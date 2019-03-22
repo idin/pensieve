@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+
 class EdgeStyle:
 	def __init__(self, colour=None, arrow_size=None, **kwargs):
 		dictionary = {
@@ -30,7 +31,7 @@ class EdgeStyle:
 		return self.__class__(**dictionary)
 
 	def __str__(self):
-		return '[' +' '.join([f'{key}={value}' for key, value in self._dictionary.items()]) + ']'
+		return '[' + ' '.join([f'{key}={value}' for key, value in self._dictionary.items()]) + ']'
 
 	def __repr__(self):
 		return str(self._dictionary)

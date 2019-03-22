@@ -1,15 +1,16 @@
 from copy import deepcopy
 
+
 class NodeStyle:
 	def __init__(
 			self,
-			colour = None,
-			text_colour = None,
-			fill_colour = None,
-			text_size = 8,
-			font = None,
-			shape = None,
-			style = None,
+			colour=None,
+			text_colour=None,
+			fill_colour=None,
+			text_size=8,
+			font=None,
+			shape=None,
+			style=None,
 			**kwargs
 	):
 		"""
@@ -38,7 +39,6 @@ class NodeStyle:
 			if value is not None:
 				self._dictionary[key] = value
 
-
 	def complement(self, original_style):
 		"""
 		:type original_style: NodeStyle
@@ -54,10 +54,8 @@ class NodeStyle:
 					dictionary[key] = value
 		return self.__class__(**dictionary)
 
-
-
 	def __str__(self):
-		return '[' +' '.join([f'{key}={value}' for key, value in self._dictionary.items()]) + ']'
+		return '[' + ' '.join([f'{key}={value}' for key, value in self._dictionary.items()]) + ']'
 
 	def __repr__(self):
 		return str(self._dictionary)
