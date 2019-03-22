@@ -1,13 +1,14 @@
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
-from memoria import make_hash_sha256
+from riddle import hash
 import dill
-
 from datetime import datetime
+
 
 def get_elapsed_seconds(start, end):
 	delta = end - start
 	return delta.seconds + delta.microseconds / 1E6
+
 
 class Memory:
 	def __init__(self, key, function, pensieve, precursors=None, safe=True, meta_data=False, _update=True, _stale=True):
@@ -15,7 +16,7 @@ class Memory:
 		:type key: str
 		:type precursors: list[Memory] or NoneType
 		:type pensieve: Pensieve
-		:type function: function
+		:type function: callable
 		:type safe: bool
 		:param safe: when True only a copy of the content is returned to avoid mutating it from outside
 		"""
@@ -73,7 +74,7 @@ class Memory:
 		return isinstance(other, Memory) and self.key == other.key
 
 	def __hash__(self):
-		return hash(self.key)
+		return self.key.__hash__()
 
 	def __repr__(self):
 		return f'Memory:{self.key}'
@@ -94,7 +95,6 @@ class Memory:
 				# so the next time it is remembered, i.e., loaded, it will be reconstructed
 				content = None
 				stale = True
-
 
 		state = {
 			'key': self._key,
@@ -144,7 +144,6 @@ class Memory:
 		memory._elapsed_seconds = state['elapsed_seconds']
 		return memory
 
-
 	@property
 	def is_frozen(self):
 		return self._frozen
@@ -167,7 +166,6 @@ class Memory:
 		:rtype: .Pensieve.Pensieve
 		"""
 		return self._pensieve
-
 
 	@property
 	def key(self):
@@ -230,6 +228,7 @@ class Memory:
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
+		:type meta_data: NoneType or dict
 		"""
 		# make precursors unique:
 		precursors = precursors or []
@@ -262,7 +261,7 @@ class Memory:
 			raise RuntimeError('Memory: You cannot change a frozen memory!')
 
 		# only mark successors stale if the content changes
-		if make_hash_sha256(content) != make_hash_sha256(self._content):
+		if hash(content) != hash(self._content):
 			for successor in self.successors:
 				successor.mark_stale()
 
@@ -289,7 +288,7 @@ class Memory:
 			inputs = PensieveEvaluationInput(precursor_keys_to_contents)
 			self.content = self._function(inputs)
 
-		self._hash = make_hash_sha256(self.content)
+		self._hash = hash(self.content)
 
 		end_time = datetime.now()
 		self._elapsed_seconds = get_elapsed_seconds(start=start_time, end=end_time)
@@ -308,7 +307,7 @@ class Memory:
 			]
 			return '\n'.join(edges)
 
-	def __graph_dict__(self):
+	def __graph_node__(self):
 		"""
 		:rtype: dict
 		"""
@@ -319,11 +318,9 @@ class Memory:
 		}
 
 
-class PensieveEvaluationInput():
+class PensieveEvaluationInput:
 	def __init__(self, inputs):
 		self.__dict__ = inputs
 
 	def __getitem__(self, name):
 		return self.__dict__[name]
-
-# end of file

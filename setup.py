@@ -1,12 +1,14 @@
 from setuptools import setup, find_packages
 
+
 def readme():
     with open('./README.md') as f:
         return f.read()
 
+
 setup(
     name='pensieve',
-    version='2.0.1',
+    version='2.0.5',
     license='GNU AGPLv3',
 
     author='Idin',
@@ -27,7 +29,7 @@ setup(
     ],
 
     packages=find_packages(exclude=("jupyter_tests", ".idea", ".git")),
-    install_requires=['dill', 'toposort', 'graphviz', 'memoria', 'slytherin'],
+    install_requires=['dill', 'toposort', 'riddle', 'slytherin'],
     python_requires='~=3.6',
     zip_safe=True,
     test_suite='nose.collector',
