@@ -1,7 +1,6 @@
 from toposort import toposort
 from .Memory import Memory
 from slytherin.collections import remove_list_duplicates
-import dill
 
 class Pensieve:
 	def __init__(self, safe=True):
@@ -116,7 +115,7 @@ class Pensieve:
 	def store(self, key, function=None, content=None, precursors=None, evaluate=True, meta_data=None):
 		"""
 		:param str key: key to the new memory
-		:param list[str] precursors: key to precursor memories
+		:param list[str] or NoneType precursors: key to precursor memories
 		:param callable function: a function that runs on precursors and produces a new memory
 		:param content: any object
 		:param bool evaluate: if False the memory will not be evaluated
@@ -207,12 +206,12 @@ class Pensieve:
 		result_str = result_str.rstrip('\n')
 		return result_str
 
-	def __graph_dict__(self):
+	def __graph__(self):
 		"""
 		:rtype: dict
 		"""
 		return {
-			'nodes': {key: memory.__graph_dict__() for key, memory in self.memories.items()},
+			'nodes': {key: memory.__graph_node__() for key, memory in self.memories.items()},
 			'edges': [(parent, child) for parent, children in self._successor_keys.items() for child in children],
 			'strict': True
 		}
