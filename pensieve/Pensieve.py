@@ -37,6 +37,12 @@ class Pensieve:
 			for memory_key, memory_state in state['memories'].items()
 		}
 
+	def __contains__(self, item):
+		"""
+		:param str item: key to a memory
+		:rtype: bool
+		"""
+		return item in self.memories
 
 	@property
 	def memories(self):
