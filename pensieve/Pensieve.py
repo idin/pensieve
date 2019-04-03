@@ -135,7 +135,7 @@ class Pensieve:
 
 		# Check inputs
 		if not key:
-			raise ValueError(f"Pensieve: no key provided for memory!")
+			raise ValueError(f'Pensieve: no key provided for memory!')
 
 		precursors = precursors or []
 		precursors = remove_list_duplicates(precursors)
@@ -143,8 +143,14 @@ class Pensieve:
 		# Check precursor states are known, i.e., precursor memories exist
 		unknown_precursors = set(precursors).difference(set(self._memories.keys()))
 		if unknown_precursors:
-			precursor_str = ', '.join([f"'{s}'" for s in unknown_precursors])
-			raise KeyError(f"Pensieve: error adding '{key}': Unknown precursor memories: {precursor_str}")
+			precursor_str = ', '.join([f'"{s}"' for s in unknown_precursors])
+			raise ValueError(f'Pensieve: error adding "{key}": Unknown precursor memories: {precursor_str}')
+
+		# make sure there is no loops
+		for memory in precursors:
+			ancestor_names = [ancestor.key for ancestor in self.get_ancestors(memory=memory)]
+			if key in ancestor_names:
+				raise RecursionError(f'Pensieve: "{key}" is an ancestor memory of its precursor: "{memory}"!')
 
 		# Create or update memory
 		precursor_memories = remove_list_duplicates([self._memories[p] for p in precursors])
@@ -221,6 +227,35 @@ class Pensieve:
 			'edges': [(parent, child) for parent, children in self._successor_keys.items() for child in children],
 			'strict': True
 		}
+
+	def _get_ancestors(self, memory, memories_travelled=None):
+		"""
+		:type node: Node or str
+		:type memories_travelled: list[Node] or None
+		:rtype: list[Node]
+		"""
+		memories_travelled = memories_travelled or []
+		memories_travelled.append(memory)
+		parents = self.get_precursors(memory=memory)
+		if len(parents) == 0:
+			return []
+		else:
+			ancestors = []
+			for parent in parents:
+				if parent not in ancestors:
+					ancestors.append(parent)
+
+				if parent not in memories_travelled:
+					parent_ancestors = self._get_ancestors(
+						memory=parent, memories_travelled=memories_travelled
+					)
+					for ancestor in parent_ancestors:
+						if ancestor not in ancestors:
+							ancestors.append(ancestor)
+			return ancestors
+
+	def get_ancestors(self, memory):
+		return self._get_ancestors(memory=memory, memories_travelled=[])
 
 
 
