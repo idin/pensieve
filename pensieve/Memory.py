@@ -25,7 +25,6 @@ class Memory:
 		self._key = key
 		self._pensieve = pensieve
 		self._content = None
-		self._hash = None
 		self._safe = safe
 		if self.key not in self.pensieve._successor_keys:
 			self.pensieve._successor_keys[self.key] = []
@@ -38,6 +37,7 @@ class Memory:
 		self._last_evaluated = None
 		self._elapsed_seconds = None
 		self._size = None
+		self._previous_hash = None
 
 		if _update:
 			self.update(precursors, function)
@@ -48,7 +48,7 @@ class Memory:
 			result = 0
 			result += get_size(self._key, exclude_objects=[self._pensieve])
 			result += get_size(self._content, exclude_objects=[self._pensieve])
-			result += get_size(self._hash, exclude_objects=[self._pensieve])
+			result += get_size(self._previous_hash, exclude_objects=[self._pensieve])
 			result += get_size(self._safe, exclude_objects=[self._pensieve])
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
 			result += get_size(self._stale, exclude_objects=[self._pensieve])
@@ -99,7 +99,7 @@ class Memory:
 		state = {
 			'key': self._key,
 			'content': content,
-			'hash': self._hash,
+			'previous_input_hash': self._previous_hash,
 			'safe': self._safe,
 			'frozen': self._frozen,
 			'stale': stale,
@@ -116,7 +116,7 @@ class Memory:
 		"""
 		self._key = state['key']
 		self._content = dill.loads(str=state['content'])
-		self._hash = state['hash']
+		self._previous_hash = state['previous_input_hash']
 		self._safe = state['safe']
 		self._frozen = state['frozen']
 		self._stale = state['stale']
@@ -259,36 +259,41 @@ class Memory:
 	def content(self, content):
 		if self.is_frozen:
 			raise RuntimeError('Memory: You cannot change a frozen memory!')
-
-		# only mark successors stale if the content changes
-		if hash(content) != hash(self._content):
-			for successor in self.successors:
-				successor.mark_stale()
-
 		self._content = content
 
 	def mark_stale(self):
 		self._stale = True
 		self._size = None
+		for successor in self.successors:
+			successor.mark_stale()
 
 	def evaluate(self):
+
 		if not self.is_stale or self.is_frozen:
 			return self.content
 		precursor_keys_to_contents = {p.key: p.evaluate() for p in self.precursors}
 		self._stale = False
 
+
 		start_time = datetime.now()
 
 		if len(self.precursor_keys) == 0:
-			self.content = self._function()
+			new_hash = hash(self._function)
+			if new_hash != self._previous_hash:
+				self.content = self._function()
+				self._previous_hash = new_hash
 		elif len(self.precursor_keys) == 1:
-			precursor_key = list(precursor_keys_to_contents.values())[0]
-			self.content = self._function(precursor_key)
+			precursor_content = list(precursor_keys_to_contents.values())[0]
+			new_hash = hash((self._function,precursor_content))
+			if new_hash != self._previous_hash:
+				self.content = self._function(precursor_content)
+				self._previous_hash = new_hash
 		else:
 			inputs = PensieveEvaluationInput(precursor_keys_to_contents)
-			self.content = self._function(inputs)
-
-		self._hash = hash(self.content)
+			new_hash = hash((self._function, inputs))
+			if new_hash != self._previous_hash:
+				self.content = self._function(inputs)
+				self._previous_hash = new_hash
 
 		end_time = datetime.now()
 		self._elapsed_seconds = get_elapsed_seconds(start=start_time, end=end_time)
@@ -324,3 +329,9 @@ class PensieveEvaluationInput:
 
 	def __getitem__(self, name):
 		return self.__dict__[name]
+
+	def __repr__(self):
+		return str(self.__dict__)
+
+	def __str__(self):
+		return self.__repr__()
