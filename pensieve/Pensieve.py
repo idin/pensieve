@@ -2,6 +2,7 @@ from toposort import toposort
 from .Memory import Memory
 from slytherin.collections import remove_list_duplicates
 
+
 class Pensieve:
 	def __init__(self, safe=True):
 		"""
@@ -67,7 +68,7 @@ class Pensieve:
 
 	def _get_key_and_memory(self, x):
 		"""
-		:param str or Memory memory: key to memory or the memory itself
+		:param str or Memory x: key to memory or the memory itself
 		:rtype tuple(str, Memory)
 		"""
 		if isinstance(x, str):
@@ -83,7 +84,7 @@ class Pensieve:
 		:param str or Memory memory: key to the memory you want the successor memories of
 		:rtype: list[Memory]
 		"""
-		memory_key, _=self._get_key_and_memory(memory)
+		memory_key, _ = self._get_key_and_memory(memory)
 		return [self._memories[successor_key] for successor_key in self._successor_keys[memory_key]]
 
 	def get_precursors(self, memory):
@@ -113,25 +114,30 @@ class Pensieve:
 	def __getitem__(self, item):
 		if item in self._memories:
 			memory = self._memories[item]
-			result = memory.evaluate()
+			result = memory.content
 			return result
 		else:
 			raise KeyError(f'Pensieve: the "{item}" memory does not exist!')
 
-	def store(self, key, function=None, content=None, precursors=None, evaluate=True, meta_data=None):
+	def store(self, key, function=None, content=None, precursors=None, materialize=True, evaluate=True, meta_data=None):
 		"""
 		:param str key: key to the new memory
-		:param list[str] or NoneType precursors: key to precursor memories
 		:param callable function: a function that runs on precursors and produces a new memory
 		:param content: any object
+		:param list[str] or NoneType precursors: key to precursor memories
+		:param bool materialize: if False, the memory does not store but only passes the results of the function
 		:param bool evaluate: if False the memory will not be evaluated
+		:param dict or NoneType meta_data: any information on the memory
 		"""
-
 
 		if function is not None and content is not None:
 			raise ValueError('Pensieve: at least one of function and content should be None!')
 		elif function is None:
-			function = lambda: content
+			if not materialize:
+				raise ValueError('Pensieve: the content has to be materialized!')
+
+			def function():
+				return content
 
 		# Check inputs
 		if not key:
@@ -157,12 +163,15 @@ class Pensieve:
 
 		if key in self._memories:
 			memory = self._memories[key]
-			memory.update(precursors=precursor_memories, function=function, meta_data=meta_data)
+			memory.update(
+				precursors=precursor_memories, function=function,
+				meta_data=meta_data, materialize=materialize,
+			)
 
 		else:
 			memory = Memory(
 				key=key, precursors=precursor_memories, function=function, pensieve=self, safe=self._safe,
-				meta_data=meta_data
+				meta_data=meta_data, materialize=materialize
 			)
 			self._memories[key] = memory
 
@@ -198,13 +207,17 @@ class Pensieve:
 			return "<empty graph>"
 
 		# Sort memories topologically
-		get_dependencies = lambda n: set(n.precursor_keys)
-		toposort_in = {memory.key: get_dependencies(memory) for memory in self._memories.values()}
-		toposorted = [l for g in toposort(toposort_in) for l in g]
+		def get_dependencies(n):
+			return set(n.precursor_keys)
+
+		to_be_topologically_sorted = {memory.key: get_dependencies(memory) for memory in self._memories.values()}
+		topologically_sorted = [l for g in toposort(to_be_topologically_sorted) for l in g]
 
 		# Find longest strings so we can pad our strings to equal length later
-		get_precursors_str = lambda n: ', '.join(self._memories[n].precursor_keys)
-		data_to_print = [(get_precursors_str(n), n, self._memories[n].is_stale) for n in toposorted]
+		def get_precursors_str(n):
+			return ', '.join(self._memories[n].precursor_keys)
+
+		data_to_print = [(get_precursors_str(n), n, self._memories[n].is_stale) for n in topologically_sorted]
 		longest_precursors_str = max([len(d[0]) for d in data_to_print])
 		longest_memory_key = max([len(d[1]) for d in data_to_print])
 
@@ -230,7 +243,7 @@ class Pensieve:
 
 	def _get_ancestors(self, memory, memories_travelled=None):
 		"""
-		:type node: Node or str
+		:type memory: Memory or str
 		:type memories_travelled: list[Node] or None
 		:rtype: list[Node]
 		"""
@@ -256,7 +269,3 @@ class Pensieve:
 
 	def get_ancestors(self, memory):
 		return self._get_ancestors(memory=memory, memories_travelled=[])
-
-
-
-# end of file
