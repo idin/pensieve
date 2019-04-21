@@ -175,9 +175,9 @@ class Pensieve:
 			)
 			self._memories[key] = memory
 
-		if evaluate:
+		if evaluate and materialize:
 			memory = self._memories[key]
-			memory.evaluate()
+			memory.content
 
 	def erase(self, memory):
 		"""

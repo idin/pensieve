@@ -263,12 +263,10 @@ class Memory:
 	@property
 	def content(self):
 		if not self._materialize:
-			print('not materialize')
 			self.set_content(content=None, content_hash=None)
 			content, content_hash = self.evaluate()
 			return content
 		elif self.is_frozen or not self.is_stale:
-			print('frozen or not stale')
 			return self._content
 		else:
 			content, content_hash = self.evaluate()
@@ -279,17 +277,18 @@ class Memory:
 		if self.is_frozen:
 			raise RuntimeError('Memory: You cannot change a frozen memory!')
 		self._content = content
+		self._stale = False
 		self._content_hash = content_hash
 
 	def mark_stale(self):
-		self._stale = True
+		if self._materialize:
+			self._stale = True
 		self._size = None
 		for successor in self.successors:
 			successor.mark_stale()
 
 	def evaluate(self):
 			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
-			self._stale = False
 
 			start_time = datetime.now()
 
@@ -306,6 +305,7 @@ class Memory:
 				new_hash = hash((self._function, precursor_content))
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
+
 				else:
 					new_content = self._function(precursor_content)
 
@@ -314,6 +314,7 @@ class Memory:
 				new_hash = hash((self._function, inputs))
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
+
 				else:
 					new_content = self._function(inputs)
 
