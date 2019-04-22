@@ -91,17 +91,15 @@ class Memory:
 		:rtype: dict
 		"""
 		stale = self._stale
-		if stale:
-			# if memory is stale there is no point in storing its content
-			content = None
-		else:
-			try:
-				content = dill.dumps(obj=self._content)
-			except:
-				# if we fail to serialize the content of the memory we store it as stale
-				# so the next time it is remembered, i.e., loaded, it will be reconstructed
-				content = None
-				stale = True
+		try:
+			content = dill.dumps(obj=self._content)
+		except Exception as e:
+			# if we fail to serialize the content of the memory we store it as stale
+			# so the next time it is remembered, i.e., loaded, it will be reconstructed
+			print(f'Could not save content of memory: "{self.key}"')
+			print(f'Exception thrown:', e)
+			content = dill.dumps(obj=None)
+			stale = True
 
 		state = {
 			'key': self._key,
@@ -144,7 +142,13 @@ class Memory:
 			meta_data=state['meta_data'],
 			_update=False, _stale=state['stale']
 		)
-		memory._content = dill.loads(str=state['content'])
+		try:
+			memory._content = dill.loads(str=state['content'])
+		except Exception as e:
+			print(f'Could not load content for memory: "{memory.key}"')
+			print(f'Exception thrown:', e)
+			memory._content = None
+
 		memory._frozen = state['frozen']
 		memory._stale = state['stale']
 		memory._last_evaluated = state['last_evaluated']
