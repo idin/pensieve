@@ -23,12 +23,12 @@ of the processes depend on others. To solve this problem I came up with the idea
 where the nodes represent data objects and the direction of edges indicate the dependency between them. 
 
 After using Pensieve for some time myself, I have found it to be beneficial in several ways:
-* Reduces errors in data wrangling and model creation
-* Organizes data objects
-* Makes data transfer easier
-* Makes data processing more coherent 
-* Facilitates the reproduction of data and models
-* Most importantly **relieves the mind**
+* error reduction, especially for data wrangling and model creation
+* data object organization
+* easy transfer of data
+* coherent data processing and data pipelines
+* data and model reproducibility
+* most importantly **relieving the mind**
 
 
 ## Installation
