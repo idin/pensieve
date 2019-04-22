@@ -8,7 +8,7 @@ def readme():
 
 setup(
     name='pensieve',
-    version='2.0.5',
+    version='2.1.1',
     license='GNU AGPLv3',
 
     author='Idin',

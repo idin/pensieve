@@ -1,4 +1,4 @@
-# Pensieve
+# *Pensieve 2.1*
 
 "*One simply siphons the excess thoughts from one's mind, pours them into the basin, and examines them at one's leisure. It becomes easier to spot patterns and links, you understand, when they are in this form.*"</br>
 &mdash;**Albus Dumbledore** (Harry Potter and the Goblet of Fire by J. K. Rowling)
@@ -37,25 +37,61 @@ pip install pensieve
 ```
 
 ## Usage
+Pensieve stores *memories* and *functions* that define the relationship between memories.
+
+```python
+from pensieve import Pensieve
+
+# initiate a pensieve
+pensieve = Pensieve()
+
+# store a "memory" (with 1 as its content) 
+pensieve.store(key='one', content=1)
+
+# create a new memory made up of a precursor memory
+pensieve.store(key='two', precursors=['one'], function=lambda x: x + x)
+```
+
+There are two types of memories:
+- *independent* memories (without precursors)
+- *dependent* memories (with precursors)
+
+### Independent Memories
+An independent memory does not have any precursors and instead of a function, 
+which would define the relationship with the precursors, has *content*.
+
 ```python
 from pensieve import Pensieve
 pensieve = Pensieve()
-```
-
-### Storing a Memory without Precursors
-```python
 pensieve.store(key='integers', content=list(range(10)))
 ```
 
-### Storing a Memory with One Precursor
+### Dependent Memories
+A dependent memory is created from running a *function* on the contents of 
+its *precursors*. When there is only one precursor to a memory, the function can be
+defined as a lambda with one input which is accessed directly within the function, 
+*e.g.*, *lambda x: x + 1*.
+
 ```python
+# the precursor, 'integer' is accessed within the lambda under the label: numbers
 pensieve.store(
     key='odd_integers', precursors=['integers'],
     function=lambda numbers: [x for x in numbers if x%2==1]
 )
 ```
 
-### Storing a Memory with More than One Precursor
+### Memory with Two or More *Precursors*
+If a memory has multiple precursors, its function should still have one input but 
+the precursors should be accessed as items in the input, as if the input is a dictionary
+of precursors.
+
+For example, if a function adds two precursors *x* and *y*, it should be defined as:
+*lambda x: x['x'] + x['y']*. In the following example, the function gets a set of integers and 
+odd integers and by filtering out the odd integers from integers, it finds all even integers
+in the set. This function has only one input, which is called *precursors* for clarity 
+(but can be called anything) and the precursors are accessed within the function as 
+items *'integers'* and *'odd_integers'* like a dictionary.
+
 ```python
 pensieve.store(
     key='even_integers', 
@@ -69,6 +105,8 @@ pensieve.store(
 
 
 ### Retrieving a Memory
+Retrieving the content of a memory is like getting an item from a dictionary as shown below.
+
 ```python
 pensieve['integers']
 # output: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -80,7 +118,7 @@ pensieve['even_integers']
 
 
 ### Changing a Memory
-When you change a memory in Pensieve all successors get notified and marked as stale but not updated immediately.
+When you change a memory in pensieve, all **successors** get notified and marked as *stale* but not updated immediately.
 As soon as a successor of a changed memory is needed it will be updated based on its relationship with its 
 precursor memories.
 
