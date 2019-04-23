@@ -1,0 +1,7 @@
+
+dist/
+
+\.idea/
+build/
+
+pensieve\.egg-info/
