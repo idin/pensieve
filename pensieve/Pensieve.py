@@ -119,6 +119,11 @@ class Pensieve:
 		else:
 			raise KeyError(f'Pensieve: the "{item}" memory does not exist!')
 
+	def __setitem__(self, key, value):
+		self.store(
+			key=key, function=None, content=value, precursors=None, materialize=True, evaluate=True, meta_data=None
+		)
+
 	def store(self, key, function=None, content=None, precursors=None, materialize=True, evaluate=True, meta_data=None):
 		"""
 		:param str key: key to the new memory
@@ -177,7 +182,7 @@ class Pensieve:
 
 		if evaluate and materialize:
 			memory = self._memories[key]
-			memory.content
+			memory.content # this will update the content if necessary
 
 	def erase(self, memory):
 		"""
