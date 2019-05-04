@@ -3,11 +3,11 @@
 "*One simply siphons the excess thoughts from one's mind, pours them into the basin, and examines them at one's leisure. It becomes easier to spot patterns and links, you understand, when they are in this form.*"</br>
 &mdash;**Albus Dumbledore** (Harry Potter and the Goblet of Fire by J. K. Rowling)
 
-![Picture of Pensieve](https://raw.githubusercontent.com/idin/pensieve/master/pictures/pensieve.jpg)
+![Picture of Pensieve](https://raw.githubusercontent.com/idin/pensieve/master/pictures/pensieve_600.jpg)
 
 ### Pensieve for Data
 
-In [J. K. Rowling](https://en.wikipedia.org/wiki/J._K._Rowling)'s amazing world of magic, 
+In [J. K. Rowling](https://en.wikipedia.org/wiki/J._K._Rowling)'s words: 
 "*a witch or wizard can **extract** their own or another's memories, **store** them in the [Pensieve](https://en.wikipedia.org/wiki/Magical_objects_in_Harry_Potter#Pensieve), 
 and **review** them later. It also **relieves the mind** when it becomes cluttered with information. 
 Anyone can **examine** the memories in the Pensieve, which also allows viewers to fully immerse 
