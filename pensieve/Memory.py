@@ -3,16 +3,18 @@ from slytherin import get_size
 from riddle import hash
 import dill
 from datetime import datetime
+from .EvaluationInput import EvaluationInput
 
 
-def get_elapsed_seconds(start, end):
+def get_elapsed_seconds(start, end=None):
+	end = end or datetime.now()
 	delta = end - start
 	return delta.seconds + delta.microseconds / 1E6
 
 
 class Memory:
 	def __init__(
-			self, key, pensieve, function, precursors=None, safe=True, meta_data=False, materialize=True,
+			self, key, pensieve, function, precursors=None, safe=True, metadata=False, materialize=True,
 			_update=True, _stale=True
 	):
 		"""
@@ -21,7 +23,7 @@ class Memory:
 		:param callable function: a function to be called on precursor memories
 		:param list[Memory] or NoneType precursors: precursor memories to this memory
 		:param bool safe: when True only a copy of the content is returned to avoid mutating it from outside
-		:param dict meta_data: an optional dictionary that carries meta data about this memory
+		:param dict metadata: an optional dictionary that carries meta data about this memory
 		:param bool materialize: when False, this memory runs the function everyone it needs the content, rather than keeping it
 		:param bool _update: if True the precursors will be updated
 		:param bool _stale:
@@ -40,14 +42,41 @@ class Memory:
 		self._frozen = False
 		self._stale = _stale
 		self._function = None
-		self._meta_data = meta_data or {}
+		self._metadata = metadata or {}
 		self._last_evaluated = None
-		self._elapsed_seconds = None
+		self._evaluation_time = None
+		self._total_time = None
 		self._size = None
 		self._content_hash = None
 
 		if _update:
 			self.update(precursors, function)
+
+	def get_summary(self, time_unit='ms'):
+		time_coefficients = {
+			'ms': 1e3,
+			'millisecond': 1e3,
+			'us': 1e6,
+			'microsecond': 1e6
+		}
+		time_coefficient = time_coefficients[time_unit] if time_unit in time_coefficients else 1
+
+		result = {
+			'key': self.key,
+			'content_type': type(self.content).__name__,
+			'materialized': self._materialize,
+			'frozen': self._frozen,
+			'last_evaluated': self._last_evaluated,
+			'evaluation_time': self.evaluation_time * time_coefficient,
+			'total_time': self.total_time * time_coefficient,
+			'size': self.size,
+			'content_hash': self._content_hash,
+			'precursors': self.precursor_keys
+		}
+		for key, value in self._metadata:
+			new_key = f'metadata_{key}' if key in result else key
+			result[new_key] = value
+		return result
 
 	@property
 	def size(self):
@@ -60,17 +89,32 @@ class Memory:
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
 			result += get_size(self._stale, exclude_objects=[self._pensieve])
 			result += get_size(self._function, exclude_objects=[self._pensieve])
-			result += get_size(self._meta_data, exclude_objects=[self._pensieve])
+			result += get_size(self._metadata, exclude_objects=[self._pensieve])
 			result += get_size(self._last_evaluated, exclude_objects=[self._pensieve])
-			result += get_size(self._elapsed_seconds, exclude_objects=[self._pensieve])
+			result += get_size(self._evaluation_time, exclude_objects=[self._pensieve])
 			result += get_size(result)
 			self._size = result
 		return self._size
 
 	@property
+	def evaluation_time(self):
+		if self._evaluation_time is None:
+			self.get_content_and_hash()
+		return self._evaluation_time
+
+	@property
+	def total_time(self):
+		if self._total_time is None:
+			if len(self.precursor_keys) == 0:
+				self._total_time = self.evaluation_time
+			else:
+				self._total_time = self.evaluation_time + sum([precursor.total_time for precursor in self.precursors])
+		return self._total_time
+
+	@property
 	def speed(self):
-		if self._elapsed_seconds:
-			return self.size/self._elapsed_seconds
+		if self._evaluation_time:
+			return self.size/self._evaluation_time
 		else:
 			return None
 
@@ -108,10 +152,10 @@ class Memory:
 			'safe': self._safe,
 			'frozen': self._frozen,
 			'stale': stale,
-			'meta_data': self._meta_data,
+			'metadata': self._metadata,
 			'function': dill.dumps(obj=self._function),
 			'last_evaluated': self._last_evaluated,
-			'elapsed_seconds': self._elapsed_seconds
+			'elapsed_seconds': self._evaluation_time
 		}
 		return state
 
@@ -125,11 +169,11 @@ class Memory:
 		self._safe = state['safe']
 		self._frozen = state['frozen']
 		self._stale = state['stale']
-		self._meta_data = state['meta_data']
+		self._metadata = state['metadata']
 		self._function = dill.loads(str=state['function'])
 		self._pensieve = None
 		self._last_evaluated = state['last_evaluated']
-		self._elapsed_seconds = state['elapsed_seconds']
+		self._evaluation_time = state['elapsed_seconds']
 
 	@classmethod
 	def from_state(cls, state, pensieve):
@@ -139,7 +183,7 @@ class Memory:
 			pensieve=pensieve,
 			precursors=None,
 			safe=state['safe'],
-			meta_data=state['meta_data'],
+			metadata=state['metadata'],
 			_update=False, _stale=state['stale']
 		)
 		try:
@@ -152,7 +196,7 @@ class Memory:
 		memory._frozen = state['frozen']
 		memory._stale = state['stale']
 		memory._last_evaluated = state['last_evaluated']
-		memory._elapsed_seconds = state['elapsed_seconds']
+		memory._evaluation_time = state['elapsed_seconds']
 		return memory
 
 	@property
@@ -235,11 +279,11 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, meta_data=None, materialize=None):
+	def update(self, precursors, function, metadata=None, materialize=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
-		:type meta_data: NoneType or dict
+		:type metadata: NoneType or dict
 		"""
 		# make precursors unique:
 		precursors = precursors or []
@@ -259,21 +303,24 @@ class Memory:
 		self._function = function
 		self.mark_stale()
 
-		if meta_data is not None:
-			self._meta_data = meta_data
+		if metadata is not None:
+			self._metadata = metadata
 		if materialize is not None:
 			self._materialize = materialize
+
+	def evaluate(self):
+		content = self.content
 
 	@property
 	def content(self):
 		if not self._materialize:
 			self.set_content(content=None, content_hash=None)
-			content, content_hash = self.evaluate()
+			content, content_hash = self.get_content_and_hash()
 			return content
 		elif self.is_frozen or not self.is_stale:
 			return self._content
 		else:
-			content, content_hash = self.evaluate()
+			content, content_hash = self.get_content_and_hash()
 			self.set_content(content=content, content_hash=content_hash)
 			return self._content
 
@@ -291,10 +338,10 @@ class Memory:
 		for successor in self.successors:
 			successor.mark_stale()
 
-	def evaluate(self):
+	def get_content_and_hash(self):
 			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
 
-			start_time = datetime.now()
+
 
 			if len(self.precursor_keys) == 0:
 				new_hash = hash(self._function)
@@ -302,7 +349,9 @@ class Memory:
 					new_content = self._content
 
 				else:
+					start_time = datetime.now()
 					new_content = self._function()
+					self._evaluation_time = get_elapsed_seconds(start=start_time)
 
 			elif len(self.precursor_keys) == 1:
 				precursor_content = list(precursor_keys_to_contents.values())[0]
@@ -311,20 +360,23 @@ class Memory:
 					new_content = self._content
 
 				else:
+					start_time = datetime.now()
 					new_content = self._function(precursor_content)
+					self._evaluation_time = get_elapsed_seconds(start=start_time)
 
 			else:
-				inputs = PensieveEvaluationInput(precursor_keys_to_contents)
+				inputs = EvaluationInput(inputs=precursor_keys_to_contents)
 				new_hash = hash((self._function, inputs))
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
 
 				else:
+					start_time = datetime.now()
 					new_content = self._function(inputs)
+					self._evaluation_time = get_elapsed_seconds(start=start_time)
 
-			end_time = datetime.now()
-			self._elapsed_seconds = get_elapsed_seconds(start=start_time, end=end_time)
-			self._last_evaluated = end_time
+
+			self._last_evaluated = datetime.now()
 			return new_content, new_hash
 
 	@property
@@ -345,19 +397,5 @@ class Memory:
 		return {
 			'label': self.label,
 			'value': None,
-			'meta_data': self._meta_data
+			'metadata': self._metadata
 		}
-
-
-class PensieveEvaluationInput:
-	def __init__(self, inputs):
-		self.__dict__ = inputs
-
-	def __getitem__(self, name):
-		return self.__dict__[name]
-
-	def __repr__(self):
-		return str(self.__dict__)
-
-	def __str__(self):
-		return self.__repr__()

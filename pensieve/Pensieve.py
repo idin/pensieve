@@ -1,6 +1,8 @@
 from toposort import toposort
 from .Memory import Memory
 from slytherin.collections import remove_list_duplicates
+import warnings
+from copy import deepcopy
 
 
 class Pensieve:
@@ -12,6 +14,8 @@ class Pensieve:
 		self._memories = {}
 		self._precursor_keys = {}
 		self._successor_keys = {}
+		if not safe:
+			warnings.warn('Memory contents can be mutated outside a safe pensieve!')
 		self._safe = safe
 
 	def __getstate__(self):
@@ -121,10 +125,10 @@ class Pensieve:
 
 	def __setitem__(self, key, value):
 		self.store(
-			key=key, function=None, content=value, precursors=None, materialize=True, evaluate=True, meta_data=None
+			key=key, function=None, content=value, precursors=None, materialize=True, evaluate=True, metadata=None
 		)
 
-	def store(self, key, function=None, content=None, precursors=None, materialize=True, evaluate=True, meta_data=None):
+	def store(self, key, function=None, content=None, precursors=None, materialize=True, evaluate=True, metadata=None):
 		"""
 		:param str key: key to the new memory
 		:param callable function: a function that runs on precursors and produces a new memory
@@ -132,7 +136,7 @@ class Pensieve:
 		:param list[str] or NoneType precursors: key to precursor memories
 		:param bool materialize: if False, the memory does not store but only passes the results of the function
 		:param bool evaluate: if False the memory will not be evaluated
-		:param dict or NoneType meta_data: any information on the memory
+		:param dict or NoneType metadata: any information on the memory
 		"""
 
 		if function is not None and content is not None:
@@ -140,6 +144,8 @@ class Pensieve:
 		elif function is None:
 			if not materialize:
 				raise ValueError('Pensieve: the content has to be materialized!')
+			if self._safe:
+				content = deepcopy(content)
 
 			def function():
 				return content
@@ -149,7 +155,10 @@ class Pensieve:
 			raise ValueError(f'Pensieve: no key provided for memory!')
 
 		precursors = precursors or []
+		number_of_precursors = len(precursors)
 		precursors = remove_list_duplicates(precursors)
+		if len(precursors) < number_of_precursors:
+			warnings.warn('There are duplicates among precursors! They are removed but they may cause error later on!')
 
 		# Check precursor states are known, i.e., precursor memories exist
 		unknown_precursors = set(precursors).difference(set(self._memories.keys()))
@@ -170,19 +179,20 @@ class Pensieve:
 			memory = self._memories[key]
 			memory.update(
 				precursors=precursor_memories, function=function,
-				meta_data=meta_data, materialize=materialize,
+				metadata=metadata, materialize=materialize,
 			)
 
 		else:
 			memory = Memory(
-				key=key, precursors=precursor_memories, function=function, pensieve=self, safe=self._safe,
-				meta_data=meta_data, materialize=materialize
+				key=key, pensieve=self, safe=self._safe,
+				precursors=precursor_memories, function=function,
+				metadata=metadata, materialize=materialize
 			)
 			self._memories[key] = memory
 
 		if evaluate and materialize:
-			memory = self._memories[key]
-			memory.content # this will update the content if necessary
+			memory = self.memories[key]
+			memory.evaluate() # this will update the content if necessary
 
 	def erase(self, memory):
 		"""
@@ -274,3 +284,12 @@ class Pensieve:
 
 	def get_ancestors(self, memory):
 		return self._get_ancestors(memory=memory, memories_travelled=[])
+
+	def evaluate(self):
+		for memory in self.memories.values():
+			memory.evaluate()
+
+	def get_summary(self, time_unit='ms'):
+		return [memory.get_summary(time_unit=time_unit) for memory in self.memories.values()]
+
+
