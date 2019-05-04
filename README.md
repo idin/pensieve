@@ -3,7 +3,9 @@
 "*One simply siphons the excess thoughts from one's mind, pours them into the basin, and examines them at one's leisure. It becomes easier to spot patterns and links, you understand, when they are in this form.*"</br>
 &mdash;**Albus Dumbledore** (Harry Potter and the Goblet of Fire by J. K. Rowling)
 
-![Picture of Pensieve](https://raw.githubusercontent.com/idin/pensieve/master/pictures/pensieve_600.jpg)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/idin/pensieve/master/pictures/pensieve_600.jpg"/>
+</p>
 
 ### Pensieve for Data
 
