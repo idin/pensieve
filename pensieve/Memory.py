@@ -1,6 +1,6 @@
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
-from riddle import hash
+from slytherin.hash import hash_object
 import dill
 from datetime import datetime
 from .EvaluationInput import EvaluationInput
@@ -344,7 +344,7 @@ class Memory:
 
 
 			if len(self.precursor_keys) == 0:
-				new_hash = hash(self._function)
+				new_hash = hash_object(self._function)
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
 
@@ -355,7 +355,7 @@ class Memory:
 
 			elif len(self.precursor_keys) == 1:
 				precursor_content = list(precursor_keys_to_contents.values())[0]
-				new_hash = hash((self._function, precursor_content))
+				new_hash = hash_object((self._function, precursor_content))
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
 
@@ -366,7 +366,7 @@ class Memory:
 
 			else:
 				inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-				new_hash = hash((self._function, inputs))
+				new_hash = hash_object((self._function, inputs))
 				if new_hash == self._content_hash and self._materialize:
 					new_content = self._content
 
