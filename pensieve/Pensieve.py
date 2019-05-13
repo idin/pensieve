@@ -1,15 +1,19 @@
-from toposort import toposort
 from .Memory import Memory
+
 from slytherin.collections import remove_list_duplicates
+from chronology import MeasurementSet
+
+from toposort import toposort
 import warnings
 from copy import deepcopy
 
 
 class Pensieve:
-	def __init__(self, safe=True):
+	def __init__(self, safe=True, function_durations=None, total_durations=None):
 		"""
 		:type safe: bool
 		:param safe: when True the memories are created as safe memories
+		:param MeasurementSet function_duration: time measurements of memory functions
 		"""
 		self._memories = {}
 		self._precursor_keys = {}
@@ -17,6 +21,7 @@ class Pensieve:
 		if not safe:
 			warnings.warn('Memory contents can be mutated outside a safe pensieve!')
 		self._safe = safe
+		self._function_durations = function_durations or MeasurementSet()
 
 	def __getstate__(self):
 		"""
@@ -192,7 +197,7 @@ class Pensieve:
 
 		if evaluate and materialize:
 			memory = self.memories[key]
-			memory.evaluate() # this will update the content if necessary
+			memory.evaluate()  # this will update the content if necessary
 
 	def erase(self, memory):
 		"""
@@ -289,7 +294,14 @@ class Pensieve:
 		for memory in self.memories.values():
 			memory.evaluate()
 
-	def get_summary(self, time_unit='ms'):
-		return [memory.get_summary(time_unit=time_unit) for memory in self.memories.values()]
+	def get_summary(self):
+		result = self.function_durations.summary_data
+		result['total_evaluation_time'] = [self.memories[name].total_time for name in result['name'].values]
+		return result
 
-
+	@property
+	def function_durations(self):
+		"""
+		:rtype: MeasurementSet
+		"""
+		return self._function_durations

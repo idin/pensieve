@@ -1,15 +1,13 @@
-from slytherin.collections import remove_list_duplicates
-from slytherin import get_size
-from slytherin.hash import hash_object
-import dill
-from datetime import datetime
 from .EvaluationInput import EvaluationInput
 
 
-def get_elapsed_seconds(start, end=None):
-	end = end or datetime.now()
-	delta = end - start
-	return delta.seconds + delta.microseconds / 1E6
+from slytherin.collections import remove_list_duplicates
+from slytherin import get_size
+from slytherin.hash import hash_object
+from chronology import Timer
+
+
+import dill
 
 
 class Memory:
@@ -24,7 +22,7 @@ class Memory:
 		:param list[Memory] or NoneType precursors: precursor memories to this memory
 		:param bool safe: when True only a copy of the content is returned to avoid mutating it from outside
 		:param dict metadata: an optional dictionary that carries meta data about this memory
-		:param bool materialize: when False, this memory runs the function everyone it needs the content, rather than keeping it
+		:param bool materialize: when False, memory runs the function when it needs the content, rather than keeping it
 		:param bool _update: if True the precursors will be updated
 		:param bool _stale:
 		"""
@@ -43,32 +41,24 @@ class Memory:
 		self._stale = _stale
 		self._function = None
 		self._metadata = metadata or {}
-		self._last_evaluated = None
-		self._evaluation_time = None
+
 		self._total_time = None
+
 		self._size = None
 		self._content_hash = None
+		self._content_type = None
 
 		if _update:
 			self.update(precursors, function)
 
-	def get_summary(self, time_unit='ms'):
-		time_coefficients = {
-			'ms': 1e3,
-			'millisecond': 1e3,
-			'us': 1e6,
-			'microsecond': 1e6
-		}
-		time_coefficient = time_coefficients[time_unit] if time_unit in time_coefficients else 1
-
+	def get_summary(self):
 		result = {
 			'key': self.key,
-			'content_type': type(self.content).__name__,
+			'content_type': self._content_type,
 			'materialized': self._materialize,
 			'frozen': self._frozen,
-			'last_evaluated': self._last_evaluated,
-			'evaluation_time': self.evaluation_time * time_coefficient,
-			'total_time': self.total_time * time_coefficient,
+			'evaluation_time': self.evaluation_time,
+			'total_time': self.total_time,
 			'size': self.size,
 			'content_hash': self._content_hash,
 			'precursors': self.precursor_keys
@@ -85,22 +75,22 @@ class Memory:
 			result += get_size(self._key, exclude_objects=[self._pensieve])
 			result += get_size(self._content, exclude_objects=[self._pensieve])
 			result += get_size(self._content_hash, exclude_objects=[self._pensieve])
+			result += get_size(self._content_type, exclude_objects=[self._pensieve])
 			result += get_size(self._safe, exclude_objects=[self._pensieve])
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
 			result += get_size(self._stale, exclude_objects=[self._pensieve])
 			result += get_size(self._function, exclude_objects=[self._pensieve])
 			result += get_size(self._metadata, exclude_objects=[self._pensieve])
-			result += get_size(self._last_evaluated, exclude_objects=[self._pensieve])
-			result += get_size(self._evaluation_time, exclude_objects=[self._pensieve])
 			result += get_size(result)
 			self._size = result
 		return self._size
 
 	@property
 	def evaluation_time(self):
-		if self._evaluation_time is None:
-			self.get_content_and_hash()
-		return self._evaluation_time
+		if self.key in self.pensieve.function_durations.measurements:
+			return self.pensieve.function_durations.measurements[self.key].mean_duration
+		else:
+			return None
 
 	@property
 	def total_time(self):
@@ -108,13 +98,16 @@ class Memory:
 			if len(self.precursor_keys) == 0:
 				self._total_time = self.evaluation_time
 			else:
-				self._total_time = self.evaluation_time + sum([precursor.total_time for precursor in self.precursors])
+				self._total_time = self.evaluation_time
+				for precursor in self.precursors:
+					self._total_time += precursor.total_time
 		return self._total_time
 
 	@property
 	def speed(self):
-		if self._evaluation_time:
-			return self.size/self._evaluation_time
+		evaluation_time = self.evaluation_time
+		if evaluation_time is not None:
+			return self.size / evaluation_time
 		else:
 			return None
 
@@ -149,13 +142,12 @@ class Memory:
 			'key': self._key,
 			'content': content,
 			'previous_input_hash': self._content_hash,
+			'content_type': self._content_type,
 			'safe': self._safe,
 			'frozen': self._frozen,
 			'stale': stale,
 			'metadata': self._metadata,
-			'function': dill.dumps(obj=self._function),
-			'last_evaluated': self._last_evaluated,
-			'elapsed_seconds': self._evaluation_time
+			'function': dill.dumps(obj=self._function)
 		}
 		return state
 
@@ -166,14 +158,13 @@ class Memory:
 		self._key = state['key']
 		self._content = dill.loads(str=state['content'])
 		self._content_hash = state['previous_input_hash']
+		self._content_type = state['content_type']
 		self._safe = state['safe']
 		self._frozen = state['frozen']
 		self._stale = state['stale']
 		self._metadata = state['metadata']
 		self._function = dill.loads(str=state['function'])
 		self._pensieve = None
-		self._last_evaluated = state['last_evaluated']
-		self._evaluation_time = state['elapsed_seconds']
 
 	@classmethod
 	def from_state(cls, state, pensieve):
@@ -195,8 +186,6 @@ class Memory:
 
 		memory._frozen = state['frozen']
 		memory._stale = state['stale']
-		memory._last_evaluated = state['last_evaluated']
-		memory._evaluation_time = state['elapsed_seconds']
 		return memory
 
 	@property
@@ -284,6 +273,7 @@ class Memory:
 		:type precursors: list[Memory]
 		:type function: callable
 		:type metadata: NoneType or dict
+		:type materialize: bool or NoneType
 		"""
 		# make precursors unique:
 		precursors = precursors or []
@@ -339,45 +329,46 @@ class Memory:
 			successor.mark_stale()
 
 	def get_content_and_hash(self):
-			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
+		precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
 
-
-
-			if len(self.precursor_keys) == 0:
-				new_hash = hash_object(self._function)
-				if new_hash == self._content_hash and self._materialize:
-					new_content = self._content
-
-				else:
-					start_time = datetime.now()
-					new_content = self._function()
-					self._evaluation_time = get_elapsed_seconds(start=start_time)
-
-			elif len(self.precursor_keys) == 1:
-				precursor_content = list(precursor_keys_to_contents.values())[0]
-				new_hash = hash_object((self._function, precursor_content))
-				if new_hash == self._content_hash and self._materialize:
-					new_content = self._content
-
-				else:
-					start_time = datetime.now()
-					new_content = self._function(precursor_content)
-					self._evaluation_time = get_elapsed_seconds(start=start_time)
+		if len(self.precursor_keys) == 0:
+			new_hash = hash_object(self._function)
+			if new_hash == self._content_hash and self._materialize:
+				new_content = self._content
 
 			else:
-				inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-				new_hash = hash_object((self._function, inputs))
-				if new_hash == self._content_hash and self._materialize:
-					new_content = self._content
+				timer = Timer(start_now=True, unit='ms')
+				new_content = self._function()
+				timer.stop()
+				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
 
-				else:
-					start_time = datetime.now()
-					new_content = self._function(inputs)
-					self._evaluation_time = get_elapsed_seconds(start=start_time)
+		elif len(self.precursor_keys) == 1:
+			precursor_content = list(precursor_keys_to_contents.values())[0]
+			new_hash = hash_object((self._function, precursor_content))
+			if new_hash == self._content_hash and self._materialize:
+				new_content = self._content
 
+			else:
+				timer = Timer(start_now=True, unit='ms')
+				new_content = self._function(precursor_content)
+				timer.stop()
+				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
 
-			self._last_evaluated = datetime.now()
-			return new_content, new_hash
+		else:
+			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
+			new_hash = hash_object((self._function, inputs))
+			if new_hash == self._content_hash and self._materialize:
+				new_content = self._content
+
+			else:
+				timer = Timer(start_now=True, unit='ms')
+				new_content = self._function(inputs)
+				timer.stop()
+				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
+
+		self._content_type = type(new_content).__name__
+
+		return new_content, new_hash
 
 	@property
 	def graphviz_edges_str(self):
