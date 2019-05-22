@@ -9,7 +9,7 @@ from copy import deepcopy
 
 
 class Pensieve:
-	def __init__(self, safe=True, function_durations=None, total_durations=None):
+	def __init__(self, safe=True, function_durations=None, warn_unsafe=True):
 		"""
 		:type safe: bool
 		:param safe: when True the memories are created as safe memories
@@ -18,7 +18,7 @@ class Pensieve:
 		self._memories = {}
 		self._precursor_keys = {}
 		self._successor_keys = {}
-		if not safe:
+		if not safe and warn_unsafe:
 			warnings.warn('Memory contents can be mutated outside a safe pensieve!')
 		self._safe = safe
 		self._function_durations = function_durations or MeasurementSet()
