@@ -54,6 +54,9 @@ class Pensieve:
 		"""
 		return item in self.memories
 
+	def keys(self):
+		return self._memories.keys()
+
 	@property
 	def memories(self):
 		"""
@@ -221,6 +224,9 @@ class Pensieve:
 		dot_str += "}"
 
 		return dot_str
+
+	def __repr__(self):
+		return str(self)
 
 	def __str__(self):
 		if not len(self._memories):
