@@ -6,8 +6,8 @@ from slytherin import get_size
 from slytherin.hash import hash_object
 from chronology import Timer
 
-
 import dill
+import pickle
 
 
 class Memory:
@@ -128,19 +128,8 @@ class Memory:
 		:rtype: dict
 		"""
 		stale = self._stale
-		try:
-			content = dill.dumps(obj=self._content)
-		except Exception as e:
-			# if we fail to serialize the content of the memory we store it as stale
-			# so the next time it is remembered, i.e., loaded, it will be reconstructed
-			print(f'Could not save content of memory: "{self.key}"')
-			print(f'Exception thrown:', e)
-			content = dill.dumps(obj=None)
-			stale = True
-
 		state = {
 			'key': self._key,
-			'content': content,
 			'previous_input_hash': self._content_hash,
 			'content_type': self._content_type,
 			'safe': self._safe,
@@ -149,6 +138,20 @@ class Memory:
 			'metadata': self._metadata,
 			'function': dill.dumps(obj=self._function)
 		}
+
+		if not stale:
+			try:
+				state['serialized'] = pickle.dumps(obj=self._content, protocol=pickle.HIGHEST_PROTOCOL)
+				state['serialized_by'] = 'pickle'
+			except:
+				try:
+					state['serialized'] = dill.dumps(obj=self._content, protocol=dill.HIGHEST_PROTOCOL)
+					state['serialized_by'] = 'dill'
+				except:
+					state['serialized_by'] = None
+		else:
+			state['serialized_by'] = None
+
 		return state
 
 	def __setstate__(self, state):
@@ -156,12 +159,25 @@ class Memory:
 		:type state: dict
 		"""
 		self._key = state['key']
-		self._content = dill.loads(str=state['content'])
-		self._content_hash = state['previous_input_hash']
+		self._stale = state['stale']
+		if state['stale']:
+			self._content = None
+			self._content_hash = None
+		else:
+			if state['serialized_by'] == 'dill':
+				self._content = dill.loads(str=state['serialized'])
+				self._content_hash = state['previous_input_hash']
+			elif state['serialized_by'] == 'pickle':
+				self._content = pickle.loads(state['serialized'])
+				self._content_hash = state['previous_input_hash']
+			else:
+				self._stale = True
+				self._content = None
+				self._content_hash = None
+
 		self._content_type = state['content_type']
 		self._safe = state['safe']
 		self._frozen = state['frozen']
-		self._stale = state['stale']
 		self._metadata = state['metadata']
 		self._function = dill.loads(str=state['function'])
 		self._pensieve = None
