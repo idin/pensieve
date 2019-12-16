@@ -1,1 +1,1 @@
-from .Pensieve import Pensieve
+from .ProtectedPensieve import Pensieve

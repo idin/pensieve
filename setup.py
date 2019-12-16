@@ -8,8 +8,8 @@ def readme():
 
 setup(
     name='pensieve',
-    version='2.1.1',
-    license='GNU AGPLv3',
+    version='3.2.2',
+    license='MIT',
 
     author='Idin',
     author_email='py@idin.ca',
@@ -29,7 +29,7 @@ setup(
     ],
 
     packages=find_packages(exclude=("jupyter_tests", ".idea", ".git")),
-    install_requires=['dill', 'toposort', 'disk', 'slytherin', 'chronology', 'interaction'],
+    install_requires=['dill', 'toposort', 'disk', 'slytherin', 'chronology', 'interaction', 'joblib'],
     python_requires='~=3.6',
     zip_safe=True,
     test_suite='nose.collector',

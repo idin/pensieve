@@ -1,10 +1,13 @@
 from .EvaluationInput import EvaluationInput
-
+from .get_type import get_type
 
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
 from slytherin.hash import hash_object
 from chronology import Timer
+from disk import Path
+from joblib import delayed
+from interaction import ProgressBar
 
 import dill
 import pickle
@@ -12,7 +15,7 @@ import pickle
 
 class Memory:
 	def __init__(
-			self, key, pensieve, function, precursors=None, safe=True, metadata=False, materialize=True,
+			self, key, pensieve, function, label=None, precursors=None, safe=True, metadata=False, materialize=True,
 			_update=True, _stale=True
 	):
 		"""
@@ -29,27 +32,156 @@ class Memory:
 		# make precursors unique
 		precursors = precursors or []
 		self._key = key
+		self._label = label
 		self._pensieve = pensieve
 		self._content = None
 		self._materialize = materialize
 		self._safe = safe
-		if self.key not in self.pensieve._successor_keys:
-			self.pensieve._successor_keys[self.key] = []
-		if self.key not in self.pensieve._precursor_keys:
-			self.pensieve._precursor_keys[self.key] = []
+		if self.pensieve is not None:
+			if self.key not in self.pensieve._successor_keys:
+				self.pensieve._successor_keys[self.key] = []
+			if self.key not in self.pensieve._precursor_keys:
+				self.pensieve._precursor_keys[self.key] = []
 		self._frozen = False
 		self._stale = _stale
-		self._function = None
+		self._function = function
 		self._metadata = metadata or {}
 
 		self._total_time = None
 
 		self._size = None
-		self._content_hash = None
+		self._precursors_hash = None
 		self._content_type = None
+		self._content_access_count = 0
 
 		if _update:
 			self.update(precursors, function)
+
+	@property
+	def num_threads(self):
+		return self.pensieve._num_threads
+
+	def clean_copy(self, include_function=False, stale=False, update=False):
+
+		result = self.__class__(
+			key=self.key, pensieve=None,
+			function=self._function if include_function else None,
+			precursors=None,
+			safe=self._safe, metadata=self._metadata.copy(),
+			materialize=self._materialize, _update=update, _stale=stale
+		)
+		return result
+
+	def partial_copy(self, include_function=False, stale=False, update=False, include_precursor_hash=True):
+		result = self.clean_copy(include_function=include_function, stale=stale, update=update)
+		result._content = self._content
+		result._frozen = self._frozen
+		result._total_time = self._total_time
+		result._size = self._size
+		result._precursors_hash = self._precursors_hash if include_precursor_hash else None
+		result._content_type = self._content_type
+		result._content_access_count = self._content_access_count
+		return result
+
+	__PARAMS__ = [
+		'key', 'materialize', 'safe', 'frozen', 'stale', 'metadata', 'total_time', 'size',
+		'precursors_hash', 'content_type', 'content_access_count'
+	]
+
+	def __hashkey__(self):
+		return self.__class__.__name__, self.parameters, self.precursor_keys
+
+	@property
+	def parameters(self):
+		return {param: getattr(self, f'_{param}') for param in self.__PARAMS__}
+
+	def __getstate__(self):
+		"""
+		:rtype: dict
+		"""
+		stale = self._stale
+		try:
+			function_dump = dill.dumps(obj=self._function, )
+		except RecursionError as e:
+			print(f'\nrecursion error during the dill.dumping of the "{self.key}" memory \n\n')
+			raise e
+
+		state = {
+			'parameters': self.parameters,
+			'function': function_dump
+		}
+
+		if not stale:
+			try:
+				state['serialized'] = pickle.dumps(obj=self._content, protocol=pickle.HIGHEST_PROTOCOL)
+				state['serialized_by'] = 'pickle'
+			except:
+				try:
+					state['serialized'] = dill.dumps(obj=self._content, protocol=dill.HIGHEST_PROTOCOL)
+					state['serialized_by'] = 'dill'
+				except:
+					state['serialized_by'] = None
+		else:
+			state['serialized_by'] = None
+
+		return state
+
+	def __setstate__(self, state):
+		"""
+		:type state: dict
+		"""
+		parameters = state['parameters']
+		for name, value in parameters.items():
+			setattr(self, f'_{name}', value)
+		if self._stale:
+			self._content = None
+			self._precursors_hash = None
+		else:
+			if state['serialized_by'] == 'dill':
+				self._content = dill.loads(str=state['serialized'])
+
+			elif state['serialized_by'] == 'pickle':
+				self._content = pickle.loads(state['serialized'])
+
+			else:
+				self._stale = True
+				self._content = None
+				self._precursors_hash = None
+		self._function = dill.loads(str=state['function'])
+		self._pensieve = None
+
+	def save(self, path):
+		"""
+		:type path: str or Path
+		"""
+		path = Path(string=path)
+		path.make_dir()
+		parameters = {param: getattr(self, f'_{param}') for param in self.__PARAMS__}
+		try:
+			(path + 'content.pensieve').save(obj=self._content)
+		except:
+			parameters['stale'] = True
+		(path + 'parameters.pensieve').save(obj=parameters)
+		(path + 'function.pensieve').save(obj=self._function, method='dill')
+
+	@classmethod
+	def load(cls, path, pensieve):
+		path = Path(string=path)
+		parameters = (path + 'parameters.pensieve').load()
+		function = (path + 'function.pensieve').load(method='dill')
+		memory = cls(
+			pensieve=pensieve, function=function, precursors=None,
+			key=parameters['key'], _update=False
+		)
+		for name, value in parameters.items():
+			setattr(memory, f'_{name}', value)
+		memory._function = function
+		try:
+			memory._content = (path + 'content.pensieve').load()
+		except:
+			memory._content = None
+			memory._stale = True
+		return memory
 
 	def get_summary(self):
 		result = {
@@ -60,7 +192,7 @@ class Memory:
 			'evaluation_time': self.evaluation_time,
 			'total_time': self.total_time,
 			'size': self.size,
-			'content_hash': self._content_hash,
+			'precursors_hash': self._precursors_hash,
 			'precursors': self.precursor_keys
 		}
 		for key, value in self._metadata:
@@ -74,7 +206,7 @@ class Memory:
 			result = 0
 			result += get_size(self._key, exclude_objects=[self._pensieve])
 			result += get_size(self._content, exclude_objects=[self._pensieve])
-			result += get_size(self._content_hash, exclude_objects=[self._pensieve])
+			result += get_size(self._precursors_hash, exclude_objects=[self._pensieve])
 			result += get_size(self._content_type, exclude_objects=[self._pensieve])
 			result += get_size(self._safe, exclude_objects=[self._pensieve])
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
@@ -111,98 +243,54 @@ class Memory:
 		else:
 			return None
 
+	def display(self, p=None):
+		print(self._get_dependency_summary())
+		if p is None:
+			try:
+				from IPython.core.display import display
+				display(self.content)
+			except ImportError:
+				print(self.content)
+		else:
+			p.pretty(self.content)
+
+	def _get_dependency_summary(self):
+		precursor_keys = self.precursor_keys
+		successor_keys = self.successor_keys
+		if len(precursor_keys) > 0:
+			precursors = 'precursors: ' + ', '.join(precursor_keys)
+		else:
+			precursors = 'no precursors'
+
+		if len(successor_keys) > 0:
+			successors = 'successors: ' + ', '.join(successor_keys)
+		else:
+			successors = 'no successors'
+		return f'{precursors}\n{successors}'
+
 	def __sizeof__(self):
 		return self.size
 
 	def __eq__(self, other):
-		return isinstance(other, Memory) and self.key == other.key
+		if not isinstance(other, self.__class__):
+			return False
+		if self.key != other.key:
+			return False
+
+		all_keys = set(self.precursor_keys).union(other.precursor_keys)
+		if len(all_keys) > len(self.precursor_keys) or len(all_keys) > len(other.precursor_keys):
+			return False
+
+		if self.content != other.content:
+			return False
+
+		return True
 
 	def __hash__(self):
-		return self.key.__hash__()
+		return hash(self.key)
 
 	def __repr__(self):
 		return f'Memory:{self.key}'
-
-	def __getstate__(self):
-		"""
-		:rtype: dict
-		"""
-		stale = self._stale
-		state = {
-			'key': self._key,
-			'previous_input_hash': self._content_hash,
-			'content_type': self._content_type,
-			'safe': self._safe,
-			'frozen': self._frozen,
-			'stale': stale,
-			'metadata': self._metadata,
-			'function': dill.dumps(obj=self._function)
-		}
-
-		if not stale:
-			try:
-				state['serialized'] = pickle.dumps(obj=self._content, protocol=pickle.HIGHEST_PROTOCOL)
-				state['serialized_by'] = 'pickle'
-			except:
-				try:
-					state['serialized'] = dill.dumps(obj=self._content, protocol=dill.HIGHEST_PROTOCOL)
-					state['serialized_by'] = 'dill'
-				except:
-					state['serialized_by'] = None
-		else:
-			state['serialized_by'] = None
-
-		return state
-
-	def __setstate__(self, state):
-		"""
-		:type state: dict
-		"""
-		self._key = state['key']
-		self._stale = state['stale']
-		if state['stale']:
-			self._content = None
-			self._content_hash = None
-		else:
-			if state['serialized_by'] == 'dill':
-				self._content = dill.loads(str=state['serialized'])
-				self._content_hash = state['previous_input_hash']
-			elif state['serialized_by'] == 'pickle':
-				self._content = pickle.loads(state['serialized'])
-				self._content_hash = state['previous_input_hash']
-			else:
-				self._stale = True
-				self._content = None
-				self._content_hash = None
-
-		self._content_type = state['content_type']
-		self._safe = state['safe']
-		self._frozen = state['frozen']
-		self._metadata = state['metadata']
-		self._function = dill.loads(str=state['function'])
-		self._pensieve = None
-
-	@classmethod
-	def from_state(cls, state, pensieve):
-		memory = Memory(
-			key=state['key'],
-			function=dill.loads(str=state['function']),
-			pensieve=pensieve,
-			precursors=None,
-			safe=state['safe'],
-			metadata=state['metadata'],
-			_update=False, _stale=state['stale']
-		)
-		try:
-			memory._content = dill.loads(str=state['content'])
-		except Exception as e:
-			print(f'Could not load content for memory: "{memory.key}"')
-			print(f'Exception thrown:', e)
-			memory._content = None
-
-		memory._frozen = state['frozen']
-		memory._stale = state['stale']
-		return memory
 
 	@property
 	def is_frozen(self):
@@ -233,15 +321,18 @@ class Memory:
 
 	@property
 	def label(self):
-		key = self.key.replace('__', '\n').replace('_', ' ')
+		output = self._label or self.key.replace('__', '\n').replace('_', ' ')
+
 		if self.is_stale and self.is_frozen:
-			return f'{key}\n(stale & frozen)'
+			output += '\n( stale & frozen )'
 		elif self.is_stale and not self.is_frozen:
-			return f'{key}\n(stale)'
+			output += '\n( stale )'
 		elif not self.is_stale and self.is_frozen:
-			return f'{key}\n(frozen)'
+			output += '\n( frozen )'
 		else:
-			return f'{key}'
+			output += f'\n{self._content_type}'
+
+		return output
 
 	@property
 	def precursor_keys(self):
@@ -267,6 +358,9 @@ class Memory:
 
 	@property
 	def precursors(self):
+		"""
+		:rtype: list[Memory]
+		"""
 		return self.pensieve.get_precursors(memory=self)
 
 	@property
@@ -284,7 +378,7 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, metadata=None, materialize=None):
+	def update(self, precursors, function, label=None, metadata=None, materialize=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
@@ -314,28 +408,89 @@ class Memory:
 		if materialize is not None:
 			self._materialize = materialize
 
+		if label is not None:
+			self._label = label
+
 	def evaluate(self):
-		content = self.content
+		_ = self.content
+
+	@property
+	def stale_precursors(self):
+		"""
+		:rtype: list[Memory]
+		"""
+		return [precursor for precursor in self.precursors if precursor.is_stale]
+
+	def _get_stale_dependencies(self, unique=False):
+		"""
+		:rtype: list[Memory]
+		"""
+		dependencies = []
+		for precursor in self.stale_precursors:
+			dependencies.append(precursor)
+			dependencies += precursor._get_stale_dependencies(unique=False)
+
+		if unique:
+			unique_dependencies = []
+			for dependency in dependencies:
+				if dependency not in unique_dependencies:
+					unique_dependencies.append(dependency)
+			return unique_dependencies
+		else:
+			return dependencies
+
+	@property
+	def stale_dependencies(self):
+		"""
+		:rtype: list[Memory]
+		"""
+		return self._get_stale_dependencies(unique=True)
+
+	def get_update_schedule(self):
+		"""
+		:rtype: list[list[Memory]]
+		"""
+		jobs = self.stale_dependencies
+		jobs.reverse()
+
+		added_to_schedule = []
+		schedule = []
+		while len(jobs) > 0:
+			job_round = []
+			for job in jobs:
+				if len(job.stale_precursors) == 0:
+					job_round.append(job)
+				elif all([dependency in added_to_schedule for dependency in job.stale_dependencies]):
+					job_round.append(job)
+
+			for job in job_round:
+				jobs.remove(job)
+			added_to_schedule += job_round
+			schedule.append(job_round)
+		return schedule
 
 	@property
 	def content(self):
 		if not self._materialize:
-			self.set_content(content=None, content_hash=None)
-			content, content_hash = self.get_content_and_hash()
-			return content
-		elif self.is_frozen or not self.is_stale:
-			return self._content
-		else:
-			content, content_hash = self.get_content_and_hash()
-			self.set_content(content=content, content_hash=content_hash)
-			return self._content
+			self.set_content(content=None, precursors_hash=None)
+			content, precursors_hash = self.get_content_and_hash()
 
-	def set_content(self, content, content_hash):
+		elif self.is_frozen or not self.is_stale:
+			content = self._content
+
+		else:
+			content, precursors_hash = self.get_content_and_hash()
+			self.set_content(content=content, precursors_hash=precursors_hash)
+			content = self._content
+
+		return content
+
+	def set_content(self, content, precursors_hash):
 		if self.is_frozen:
 			raise RuntimeError('Memory: You cannot change a frozen memory!')
 		self._content = content
 		self._stale = False
-		self._content_hash = content_hash
+		self._precursors_hash = precursors_hash
 
 	def mark_stale(self):
 		if self._materialize:
@@ -345,15 +500,40 @@ class Memory:
 			successor.mark_stale()
 
 	def get_content_and_hash(self):
-		precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
+		if self.num_threads == 1:
+			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
+		else:
+			def get_content(p):
+				return p.content
+
+			precursors = self.precursors
+
+			schedule = self.get_update_schedule()
+
+			progress_bar = ProgressBar(
+				total=sum([len(schedule_round) for schedule_round in schedule]),
+				echo=self.pensieve._echo
+			)
+
+			progress_amount = 0
+			for schedule_round in schedule:
+				progress_bar.show(amount=progress_amount, text=f'updating {len(schedule_round)} memories')
+				self.pensieve.processor(delayed(get_content)(job) for job in schedule_round)
+				progress_amount += len(schedule_round)
+			if progress_amount > 0:
+				progress_bar.show(amount=progress_amount, text=f'{self.key} updated!')
+
+			contents = self.pensieve.processor(delayed(get_content)(p) for p in precursors)
+			keys = [precursor.key for precursor in precursors]
+			precursor_keys_to_contents = {key: content for key, content in zip(keys, contents)}
 
 		if len(self.precursor_keys) == 0:
 			new_hash = hash_object(self._function)
-			if new_hash == self._content_hash and self._materialize:
+			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 
 			else:
-				timer = Timer(start_now=True, unit='ms')
+				timer = Timer(start_now=True, unit='timedelta')
 				new_content = self._function()
 				timer.stop()
 				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
@@ -361,11 +541,11 @@ class Memory:
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
 			new_hash = hash_object((self._function, precursor_content))
-			if new_hash == self._content_hash and self._materialize:
+			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 
 			else:
-				timer = Timer(start_now=True, unit='ms')
+				timer = Timer(start_now=True, unit='timedelta')
 				new_content = self._function(precursor_content)
 				timer.stop()
 				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
@@ -373,17 +553,19 @@ class Memory:
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
 			new_hash = hash_object((self._function, inputs))
-			if new_hash == self._content_hash and self._materialize:
+			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 
 			else:
-				timer = Timer(start_now=True, unit='ms')
-				new_content = self._function(inputs)
+				timer = Timer(start_now=True, unit='timedelta')
+				new_content = self._function(inputs.originals)
+
 				timer.stop()
 				self.pensieve.function_durations.add_measurement(name=self.key, timer=timer)
 
-		self._content_type = type(new_content).__name__
+		self._content_type = get_type(new_content)
 
+		self._content_access_count += 1
 		return new_content, new_hash
 
 	@property

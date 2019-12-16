@@ -5,3 +5,4 @@ dist/
 build/
 
 pensieve\.egg-info/
+pensieve/__pycache__

@@ -1,10 +1,9 @@
-# *Pensieve 2.1*
-
+# *Pensieve 3.2*
 
 "*One simply siphons the excess thoughts from one's mind, pours them into the basin, and examines them at one's leisure. It becomes easier to spot patterns and links, you understand, when they are in this form.*"</br>
 &mdash;**Albus Dumbledore** (Harry Potter and the Goblet of Fire by J. K. Rowling)  
 <p align="center">
-  <img src="https://raw.githubusercontent.com/idin/pensieve/master/pictures/pensieve_600.jpg"/>
+  <img src="http://idin.ca/storage/python/pensieve/images/pensieve_600.jpg"/>
 </p>
 
 
@@ -33,7 +32,41 @@ After using Pensieve for some time myself, I have found it to be beneficial in s
 * easy transfer of data
 * coherent data processing and data pipelines
 * data and model reproducibility
-* most importantly **relieving the mind**
+* parallel processing
+* performance and cost analysis in terms of computation time and memory usage
+* graphical visualization of data and processes
+* most important of all: **relieving the mind**
+
+Using pensieve is similar to using a dictionary:
+
+```python
+from pensieve import Pensieve
+from math import pi
+
+# initiate a pensieve
+pensieve = Pensieve()
+
+# store a "memory" (with 1 as its content) 
+pensieve['radius'] = 5
+
+# create a new memory made up of a precursor memory
+# it is as easy as passing a defined function or a lambda to pensieve
+pensieve['circumference'] = lambda radius: 2 * pi * radius
+print(pensieve['circumference'])
+```
+outputs:
+
+`31.41592653589793`
+
+Changing the radius, in this example, will affect the circumference 
+but it is only calculated when needed:
+```python
+pensieve['radius'] = 6
+print(pensieve['circumference'])
+```
+outputs 
+
+`37.69911184307752`
 
 
 ## Installation
@@ -44,97 +77,266 @@ pip install pensieve
 ## Usage
 Pensieve stores *memories* and *functions* that define the relationship between memories.
 
-```python
-from pensieve import Pensieve
 
-# initiate a pensieve
-pensieve = Pensieve()
 
-# store a "memory" (with 1 as its content) 
-pensieve.store(key='one', content=1)
+## Concepts
 
-# create a new memory made up of a precursor memory
-pensieve.store(key='two', precursors=['one'], function=lambda x: x + x)
-```
+### Memory
+A `Pensieve` is a *computation graph* where the nodes hold values and edges 
+show dependency between nodes. Each node is called a `Memory`.
+
+Every *memory* has two important attributes:
+- `key`: the name of the memory which should be identical
+- `content`: the object the memory holds
+
+Some memories have two other attributes:
+- `precursors`: other memories a memory depends on
+- `function`: a function that defines the relationship between a memory
+and its precursors
 
 There are two types of memories:
 - *independent* memories (without precursors)
 - *dependent* memories (with precursors)
 
+### Storing a Memory
+As explained above, you can work with pensieve similar to how you use a
+dictionary. Adding a new item, *i.e.*, a memory and its content, to pensieve is
+called *storing*. In fact the `Pensieve` class has a `store` method which 
+can be used for storing new memories. However, we only use it for advanced
+functionality. We do not use it as frequently because a new simpler notation 
+introduced since version 2 makes working pensieve much more coherent. 
+We will explain the `store` method and its notation in the *Advanced Usage* section.
+
+### Retrieving a Memory
+Retrieving the content of a memory is like getting an item from a dictionary.
+
+```python
+print(pensieve['circumference'])
+```
+
 ### Independent Memories
-An independent memory does not have any precursors and instead of a function, 
-which would define the relationship with the precursors, has *content*.
+An independent memory is like a root node in pensieve. It holds an object and
+it does not depend on any other memory.
 
 ```python
 from pensieve import Pensieve
+
 pensieve = Pensieve()
-pensieve.store(key='integers', content=list(range(10)))
-```
 
-### Dependent Memories
-A dependent memory is created from running a *function* on the contents of 
-its *precursors*. When there is only one precursor to a memory, the function can be
-defined as a lambda with one input which is accessed directly within the function, 
-*e.g.*, *lambda x: x + 1*.
+pensieve['text'] = 'Hello World!'
+pensieve['number'] = 1
+pensieve['list_of_numbers'] = [1, 3, 2]
+```
+In the above example, *text*, *number*, and *list* are the names of three 
+independent memories and their contents are 
+the string `'Hello World'`, 
+the integer `1`, 
+and a list consisting of three integers.
+
+### Dependent Memories and Precursors
+A dependent memory is created from running a *function* on other dependent or
+independent memories as the function's arguments. We call those memories, *precursors*;
+*i.e.*, if a memory depends on another memory, the former is a *dependent* memory 
+and the latter is its *precursor*.
+
+The easiest way to define a dependent memory is by passing a function to pensieve
+whose arguments match the names of precursors.
 
 ```python
-# the precursor, 'integer' is accessed within the lambda under the label: numbers
-pensieve.store(
-    key='odd_integers', precursors=['integers'],
-    function=lambda numbers: [x for x in numbers if x%2==1]
+def print_and_return_first_word(text):
+    words = text.split()
+    print(words[0])
+    return words[0]
+    
+pensieve['first_word'] = print_and_return_first_word
+```
+In the above example, the `print_and_return_first_word` function accepts one argument:
+`text` which is the name of the precursor.
+
+You can also use a lambda, when possible, to define a dependent memory.
+
+```python
+pensieve['sorted_list'] = lambda list_of_numbers: sorted(list_of_numbers)
+```
+
+### Successors
+Memories that depend on a memory are its *successors*. If a precursor is like a 
+parent, a successor is like a child. 
+
+In the above example, `sorted_list` is a successor of `list_of_numbers`.
+
+### Staleness
+If one or more precursors of a memory change, the memory and all its successors becomes *stale*. 
+A stale memory is only refreshed when needed and if after calculation, it is found out
+that the content has not changed, the successors go back to being up-to-date, but if 
+the content has in fact changed, the stay stale and will be updated when needed.
+
+**Note**: if a memory is stale, retrieving its content will update it.
+
+## Visualization
+
+```python
+from pensieve import Pensieve
+from pandas import DataFrame, concat
+from numpy.random import randint, seed
+
+# set seed for the randint function
+seed(17)
+
+# set up a pensieve with a top-bottom (tb) representation
+# the top-bottom graph_direction is purely aesthetic
+# you can also use lr for left to right or rl for right to left or bottom-top
+pensieve = Pensieve(graph_direction='tb')
+
+# choose the number of columns for two dataframes
+pensieve['number_of_columns'] = 9
+
+# create generic names for the columns, in this case x_1, x_2, ...
+pensieve['column_names'] = lambda number_of_columns: [
+    f'x_{i + 1}' for i in range(number_of_columns)
+]
+
+# choose the range of random values, and store them as a dictionary 
+pensieve['value_range'] = {'low': 1, 'high': 5}
+
+# define a function that creates a dataframe with the above parameters
+def create_dataframe(column_names, value_range, number_of_rows):
+    return DataFrame({
+        column: randint(
+            low=value_range['low'], 
+            high=value_range['high'], 
+            size=number_of_rows
+        )
+        for column in column_names
+    })
+
+# create the first dataframe
+pensieve['data_1'] = lambda column_names, value_range: create_dataframe(
+    column_names=column_names, value_range=value_range, number_of_rows=5
 )
-```
 
-### Memory with Two or More *Precursors*
-If a memory has multiple precursors, its function should still have one input but 
-the precursors should be accessed as items in the input, as if the input is a dictionary
-of precursors.
-
-For example, if a function adds two precursors *x* and *y*, it should be defined as:
-*lambda x: x['x'] + x['y']*. In the following example, the function gets a set of integers and 
-odd integers and by filtering out the odd integers from integers, it finds all even integers
-in the set. This function has only one input, which is called *precursors* for clarity 
-(but can be called anything) and the precursors are accessed within the function as 
-items *'integers'* and *'odd_integers'* like a dictionary.
-
-```python
-pensieve.store(
-    key='even_integers', 
-    precursors=['integers', 'odd_integers'],
-    function=lambda precursors: [
-        x for x in precursors['integers'] 
-        if x not in precursors['odd_integers']
-    ]
+# create the second dataframe
+pensieve['data_2'] = lambda column_names, value_range: create_dataframe(
+    column_names=column_names, value_range=value_range, number_of_rows=3
 )
+
+# concatenate the two dataframes
+pensieve['data_1_and_2'] = lambda data_1, data_2: concat(
+    objs=[data_1, data_2], 
+    sort=False
+)
+
+# choose a coefficient for a future multiplication
+pensieve['coefficient'] = 5
+
+# define a function that sums all the values in each row and 
+# multiplies the result by the coefficient
+def sum_and_multiply(data_1_and_2, coefficient):
+    data = data_1_and_2.copy()
+    data['summation'] = data.apply(sum, axis=1)
+    data['coefficient'] = coefficient
+    data['y'] = data['summation'] * data['coefficient']
+    return data
+
+# get the result of the sum_and_multiply function
+pensieve['result'] = sum_and_multiply
+
+# display the pensieve
+display(pensieve) 
+# or simply pensieve at the end of a jupyter notebook cell
 ```
 
+<p align="center">
+  <img 
+    src="http://idin.ca/storage/python/pensieve/images/pensieve_visualization.png"
+    width=60%
+  />
+</p>
 
-### Retrieving a Memory
-Retrieving the content of a memory is like getting an item from a dictionary as shown below.
 
+
+## Advanced Usage
+
+### Parallel Processing
 ```python
-pensieve['integers']
-# output: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+from pensieve import Pensieve
+from time import sleep
+from datetime import datetime
 
-pensieve['even_integers']
-# output: [0, 2, 4, 6, 8]
+# as in other libraries, num_threads=-1 means 
+# using as many threads as available
 
+start_time = datetime.now()
+pensieve = Pensieve(num_threads=-1, evaluate=False)
+
+pensieve['x'] = 1
+pensieve['y'] = 10
+pensieve['z'] = 2
+pensieve['w'] = 20
+
+def add_with_delay(x, y):
+    print(f'adding {x} and {y}, slowly, at {datetime.now()}')
+    sleep(1)
+    return x + y
+    
+pensieve['x_plus_y'] = add_with_delay
+pensieve['z_plus_w'] = lambda z, w: add_with_delay(x=z, y=w)
+# we had to use a lambda for this one because the arguments
+# of the add_with_delay function are different
+
+pensieve['all_the_four'] = lambda x_plus_y, z_plus_w: add_with_delay(x=x_plus_y, y=z_plus_w)
+elapsed = datetime.now() - start_time
+print('Nothing has been calculated yet. Elapsed time:', elapsed)
+
+print('Getting all_the_four forces the calculation of everything')
+
+start_time = datetime.now()
+print('Result of adding the four numbers:', pensieve['all_the_four'])
+elapsed = datetime.now() - start_time
+print('Elapsed time:', elapsed)
 ```
+The above code produces the following output:
+```
+Nothing has been calculated yet. Elapsed time: 0:00:00.000716
+Getting all_the_four forces the calculation of everything
+adding 2 and 20, slowly, at 2019-12-15 21:33:55.063888
+adding 1 and 10, slowly, at 2019-12-15 21:33:55.064526
+adding 11 and 22, slowly, at 2019-12-15 21:33:56.188258
+Result of adding the four numbers: 33
+Elapsed time: 0:00:02.341677
+```
+Two of the calculations were executed in parallel: `x + y` and `z + w`. 
+With an overhead of `0.34` seconds, the three calculations took `2.34` seconds.
 
-
-### Changing a Memory
-When you change a memory in pensieve, all **successors** get notified and marked as *stale* but not updated immediately.
-As soon as a successor of a changed memory is needed it will be updated based on its relationship with its 
-precursor memories.
-
+Let's see what happens if we do it the ordinary way:
 ```python
-# changing one memory affects all successors
-pensieve.store(key='integers', content=list(range(16)))
-pensieve['integers']
-# output: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-pensieve['even_integers']
-# output: [0, 2, 4, 6, 8, 10, 12, 14]
+start_time = datetime.now()
+x = 1
+y = 10
+z = 2
+w = 20
+x_plus_y = add_with_delay(x, y)
+z_plus_w = add_with_delay(z, w)
+all_the_four = add_with_delay(x_plus_y, z_plus_w)
+print('Result of adding the four numbers:', all_the_four)
+elapsed = datetime.now() - start_time
+print('Elapsed time:', elapsed)
 ```
+This time the following output is produced:
+```
+adding 1 and 10, slowly, at 2019-12-15 21:38:11.618910
+adding 2 and 20, slowly, at 2019-12-15 21:38:12.620105
+adding 11 and 22, slowly, at 2019-12-15 21:38:13.625195
+Result of adding the four numbers: 33
+Elapsed time: 0:00:03.011291
+```
+With an overhead of `0.01` seconds, the three calculations 
+ran one after the other and took `3.01` seconds.
 
-### Save and Load
+### The `store` Method
+***TBD***
+
+
+
+
+
