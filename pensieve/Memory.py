@@ -4,10 +4,11 @@ from .get_type import get_type
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
 from slytherin.hash import hash_object
-from chronology import Timer
+from chronometry import Timer
 from disk import Path
 from joblib import delayed
-from interaction import ProgressBar
+from chronometry.progress import ProgressBar
+from pandas import DataFrame, Series
 
 import dill
 import pickle
@@ -43,6 +44,7 @@ class Memory:
 			if self.key not in self.pensieve._precursor_keys:
 				self.pensieve._precursor_keys[self.key] = []
 		self._frozen = False
+		self._deep_freezed = False
 		self._stale = _stale
 		self._function = function
 		self._metadata = metadata or {}
@@ -56,6 +58,11 @@ class Memory:
 
 		if _update:
 			self.update(precursors, function)
+
+	__PARAMS__ = [
+		'key', 'label', 'materialize', 'safe', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
+		'precursors_hash', 'content_type', 'content_access_count'
+	]
 
 	@property
 	def num_threads(self):
@@ -75,6 +82,7 @@ class Memory:
 	def partial_copy(self, include_function=False, stale=False, update=False, include_precursor_hash=True):
 		result = self.clean_copy(include_function=include_function, stale=stale, update=update)
 		result._content = self._content
+		result._content = self._content
 		result._frozen = self._frozen
 		result._total_time = self._total_time
 		result._size = self._size
@@ -82,11 +90,6 @@ class Memory:
 		result._content_type = self._content_type
 		result._content_access_count = self._content_access_count
 		return result
-
-	__PARAMS__ = [
-		'key', 'materialize', 'safe', 'frozen', 'stale', 'metadata', 'total_time', 'size',
-		'precursors_hash', 'content_type', 'content_access_count'
-	]
 
 	def __hashkey__(self):
 		return self.__class__.__name__, self.parameters, self.precursor_keys
@@ -300,13 +303,22 @@ class Memory:
 	def is_stale(self):
 		return self._stale
 
-	def freeze(self):
+	def freeze(self, forever=False):
 		self._frozen = True
+		self._deep_freezed = forever
+		if forever:
+			self._function = None
+
+	def deep_freeze(self):
+		self.freeze(forever=True)
 
 	def unfreeze(self):
-		self._frozen = False
-		if self._stale:
-			self.mark_stale()
+		if not self._deep_freezed:
+			self._frozen = False
+			if self._stale:
+				self.mark_stale()
+		else:
+			print(f'{self.key} is deep-freezed and cannot be thawed!')
 
 	@property
 	def pensieve(self):
@@ -323,12 +335,17 @@ class Memory:
 	def label(self):
 		output = self._label or self.key.replace('__', '\n').replace('_', ' ')
 
+		if self._deep_freezed:
+			frozen_label = 'deep-freezed'
+		else:
+			frozen_label = 'frozen'
+
 		if self.is_stale and self.is_frozen:
-			output += '\n( stale & frozen )'
+			output += f'\n( stale & {frozen_label} )'
 		elif self.is_stale and not self.is_frozen:
 			output += '\n( stale )'
 		elif not self.is_stale and self.is_frozen:
-			output += '\n( frozen )'
+			output += f'\n( {frozen_label} )'
 		else:
 			output += f'\n{self._content_type}'
 
@@ -386,6 +403,9 @@ class Memory:
 		:type materialize: bool or NoneType
 		"""
 		# make precursors unique:
+		if self.is_frozen:
+			raise MemoryError(f'{self.key} is frozen. You cannot change a frozen memory!')
+
 		precursors = precursors or []
 		precursors = remove_list_duplicates(precursors)
 
@@ -470,6 +490,13 @@ class Memory:
 		return schedule
 
 	@property
+	def type_significance(self):
+		if isinstance(self._content, (DataFrame, Series, list, dict, set)):
+			return 2
+		else:
+			return 1
+
+	@property
 	def content(self):
 		if not self._materialize:
 			self.set_content(content=None, precursors_hash=None)
@@ -487,7 +514,7 @@ class Memory:
 
 	def set_content(self, content, precursors_hash):
 		if self.is_frozen:
-			raise RuntimeError('Memory: You cannot change a frozen memory!')
+			raise MemoryError(f'{self.key} is frozen. You cannot change a frozen memory!')
 		self._content = content
 		self._stale = False
 		self._precursors_hash = precursors_hash

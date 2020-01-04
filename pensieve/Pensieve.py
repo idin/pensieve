@@ -3,14 +3,15 @@ from .create_pensieve_function import create_pensieve_function
 from .exceptions import *
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_function_arguments
-from chronology import MeasurementSet, convert
-from interaction import ProgressBar
+from chronometry import MeasurementSet, convert
+from chronometry.progress import ProgressBar
 from joblib import Parallel
 
 from toposort import toposort
 import warnings
 from copy import deepcopy
 from disk import Path
+from abstract import Graph
 
 
 class Directory:
@@ -278,26 +279,12 @@ class Pensieve:
 	memory = directory
 	using = directory
 
-	@property
-	def graph(self):
-		"""
-		:rtype: abstract.Graph.Graph
-		"""
-		return self.get_graph(direction=self._graph_direction or 'LR')
-
 	def get_graph(self, direction='LR'):
 		"""
-		:rtype: abstract.Graph.Graph
+		:type direction: str
+		:rtype: Graph
 		"""
-		try:
-			from abstract import Graph
-			return Graph(obj=self, direction=self._graph_direction or direction)
-		except ImportError:
-			warnings.warn("""
-		You need to have installed the "abstract" library in order to use this method.
-		You can install abstract using pip: "pip install abstract"
-					""")
-			return None
+		return Graph(obj=self, direction=direction)
 
 	def display(self, p=None, dpi=300, hide_ignored=None, direction=None, path=None, height=None, width=None):
 		if hide_ignored is None:
@@ -337,19 +324,32 @@ class Pensieve:
 		"""
 		return self._memories_dictionary
 
-	def freeze(self, memory):
+	def freeze(self, memory=None, forever=False):
 		"""
 		:type memory: Memory or str
 		"""
-		memory_key, memory = self._get_key_and_memory(x=memory)
-		self.memories_dictionary[memory_key].freeze()
+		if memory is not None:
+			memory_key, memory = self._get_key_and_memory(x=memory)
+			memory.freeze(forever=forever)
 
-	def unfreeze(self, memory):
+		else:
+			for memory in self.memories_dictionary.values():
+				memory.freeze(forever=forever)
+
+	def deep_freeze(self, memory=None):
+		self.freeze(memory=memory, forever=True)
+
+
+	def unfreeze(self, memory=None):
 		"""
 		:type memory: Memory or str
 		"""
-		memory_key, memory = self._get_key_and_memory(x=memory)
-		self.memories_dictionary[memory_key].unfreeze()
+		if memory is not None:
+			memory_key, memory = self._get_key_and_memory(x=memory)
+			memory.unfreeze()
+		else:
+			for memory in self.memories_dictionary.values():
+				memory.unfreeze()
 
 	def _get_key_and_memory(self, x):
 		"""
@@ -454,7 +454,7 @@ class Pensieve:
 		:param callable function: a function that runs on precursors and produces a new memory
 		:param content: any object
 		:param list[str] or NoneType precursors: key to precursor memories
-		:param bool materialize: if False, the memory does not store but only passes the results of the function
+		:param bool or NoneType materialize: if False, the memory does not store but only passes the results of the function
 		:param bool or NoneType evaluate: if False the memory will not be evaluated
 		:param dict or NoneType metadata: any information on the memory
 		"""
@@ -606,11 +606,6 @@ class Pensieve:
 		:rtype: dict
 		"""
 
-		def reverse_colour(style):
-			style = style.copy()
-			style.colour = style.colour.nearest_gray
-			return style
-
 		if self._hide_ignored:
 			memories_dictionary = {
 				key: memory for key, memory in self.memories_dictionary.items()
@@ -625,17 +620,36 @@ class Pensieve:
 			memories_dictionary = self.memories_dictionary
 			successor_keys = self._successor_keys
 
-		stale_colours = {
-			name: '#f2f2f2'
+		frozen_colour = '#deebf7'
+		edge_frozen_colour ='#b8d4ed'
+
+		node_colours = {
+			name: '#f2f2f2' if not memory.is_frozen else frozen_colour
 			for name, memory in self.memories_dictionary.items()
-			if memory.is_stale
+			if memory.is_stale or memory.is_frozen
+		}
+
+		frozen_edges = [
+			(parent, child) for parent, children in successor_keys.items()
+			for child in children
+			if self.memories_dictionary[parent].is_frozen and self.memories_dictionary[parent].has_successors
+		]
+
+		edge_colours = {
+			parent_child: edge_frozen_colour
+			for parent_child in frozen_edges
 		}
 
 		return {
+			'colour_scheme': 'pensieve2',
 			'nodes': {key: memory.__graph_node__() for key, memory in memories_dictionary.items()},
-			'edges': [(parent, child) for parent, children in successor_keys.items() for child in children],
+			'edges': [
+				(parent, child, {'style': {'line_width': self.memories_dictionary[parent].type_significance*5}})
+				for parent, children in successor_keys.items() for child in children
+			],
 			'strict': True,
-			'node_colours': stale_colours
+			'node_colours': node_colours,
+			'edge_colours': edge_colours
 		}
 
 	def _get_ancestors(self, memory, memories_travelled=None):
@@ -681,6 +695,7 @@ class Pensieve:
 			lambda x: convert(delta=self.memories_dictionary[x['name']].total_time, to_unit=x['unit']),
 			axis=1
 		)
+		result['precursor_evaluation_time'] = result['total_evaluation_time'] - result['mean_duration']
 
 		# sizes = [{'name': name, 'type': memory.get_summary()} for name, memory in self.memories_dictionary.items()]
 		return result
