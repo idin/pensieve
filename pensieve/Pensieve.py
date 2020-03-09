@@ -37,14 +37,18 @@ class Directory:
 class Pensieve:
 	def __init__(
 			self, safe=False, function_durations=None, warn_unsafe=False, hide_ignored=False,
-			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, echo=0
+			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=True, echo=0
 	):
 		"""
-		:param bool safe: if True, pensieve memories will be safe from mutations
-		:param safe: when True the memories are created as safe memories
-		:param str graph_direction: 'LR' for left to right, 'UD' for up-down
-		:param MeasurementSet function_durations: time measurements of memory functions
-		:type echo: int or ProgressBar or bool
+		:param bool 	safe: 				if True, pensieve memories will be safe from mutations
+		:param bool 	hide_ignored: 		if True, ignored nodes will be hidden
+		:param str 		graph_direction: 	'LR' for left to right, 'UD' for up-down
+		:param int 		num_threads: 		number of concurrent threads to use in processing, -1 for auto
+		:param bool 	evaluate: 			to evaluate each node immediately or lazily
+		:param bool 	materialize: 		if False, calculated nodes will not be materialized into memory
+
+		:param MeasurementSet 						function_durations: 	time measurements of memory functions
+		:param bool or int or ProgressBar 			echo: 					int or ProgressBar or bool
 		"""
 		self._graph_direction = graph_direction
 		self._memories_dictionary = {}
@@ -62,13 +66,24 @@ class Pensieve:
 		self._evaluate = evaluate
 		self._materialize = materialize
 		self._echo = echo
+		if backup:
+			if isinstance(backup, bool):
+				backup = 'pensieve'
+			self._backup_directory = Path(backup)
+			self._backup_directory.make_dir(ignore_if_exists=True)
+			self._backup_memory_directory = self.backup_directory.make_dir(name='memories', ignore_if_exists=True)
+
+		else:
+			self._backup_directory = None
+			self._backup_memory_directory = None
 
 	_PARAMETERS_ = ['safe', 'warn_safe', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
 	_STATE_ATTRIBUTES_ = [
 		'_graph_direction',
 		'_memories_dictionary', '_precursor_keys', '_successor_keys',
 		'_safe', '_warn_safe', '_function_durations', '_directory', '_hide_ignored',
-		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_materialize', '_echo'
+		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_materialize', '_echo',
+		'_backup_directory', '_backup_memory_directory'
 	]
 
 	@property
@@ -77,6 +92,20 @@ class Pensieve:
 		:rtype: NoneType or Parallel
 		"""
 		return Parallel(n_jobs=self._num_threads, backend='threading', require='sharedmem')
+
+	@property
+	def backup_directory(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		return self._backup_directory
+
+	@property
+	def backup_memory_directory(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		return self._backup_memory_directory
 
 	def __add__(self, other):
 		"""
@@ -327,6 +356,7 @@ class Pensieve:
 	def freeze(self, memory=None, forever=False):
 		"""
 		:type memory: Memory or str
+		:type forever: bool
 		"""
 		if memory is not None:
 			memory_key, memory = self._get_key_and_memory(x=memory)
@@ -337,12 +367,14 @@ class Pensieve:
 				memory.freeze(forever=forever)
 
 	def deep_freeze(self, memory=None):
+		"""
+		:type memory: Memory or str or NoneType
+		"""
 		self.freeze(memory=memory, forever=True)
-
 
 	def unfreeze(self, memory=None):
 		"""
-		:type memory: Memory or str
+		:type memory: Memory or str or NoneType
 		"""
 		if memory is not None:
 			memory_key, memory = self._get_key_and_memory(x=memory)
@@ -451,6 +483,7 @@ class Pensieve:
 	):
 		"""
 		:param str key: key to the new memory
+		:param str or NoneType label:
 		:param callable function: a function that runs on precursors and produces a new memory
 		:param content: any object
 		:param list[str] or NoneType precursors: key to precursor memories
@@ -621,7 +654,7 @@ class Pensieve:
 			successor_keys = self._successor_keys
 
 		frozen_colour = '#deebf7'
-		edge_frozen_colour ='#b8d4ed'
+		edge_frozen_colour = '#b8d4ed'
 
 		node_colours = {
 			name: '#f2f2f2' if not memory.is_frozen else frozen_colour
@@ -718,9 +751,13 @@ class Pensieve:
 		"""
 		decouples a dictionary memory into its items as new memories and returns the names of new memories
 		:param str key: key of the original memory
-		:param str prefix: prefix for new children, if None, the original key will be used with a separator
-		:param list[str] or str or NoneType precursors: other dependencies that are not automatically added but should be considered in case changes do not automatically make this memory stale
-		:param str separator:
+		:param str or NoneType prefix: prefix for new children, if None, the original key will be used with a separator
+		:param str or NoneType suffix: suffix to be added at the end of keys for children
+		:param list[str] or str or NoneType precursors: other dependencies that are not automatically added but should
+		be considered in case changes do not automatically make this memory stale
+		:param str separator: separator to be used for creating keys for children
+		:param NoneType or bool evaluate:
+		:param NoneType or bool materialize:
 		:rtype: list[str]
 		"""
 		keys = self[key].keys()
