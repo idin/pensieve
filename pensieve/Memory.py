@@ -12,6 +12,7 @@ from pandas import DataFrame, Series
 
 import dill
 import pickle
+from inspect import getsource as get_source
 
 
 class Memory:
@@ -55,13 +56,17 @@ class Memory:
 		self._precursors_hash = None
 		self._content_type = None
 		self._content_access_count = 0
+		if self.pensieve.backup_memory_directory:
+			self._backup_directory = self.pensieve.backup_memory_directory.make_dir(name=self.key, ignore_if_exists=True)
+		else:
+			self._backup_directory = None
 
 		if _update:
 			self.update(precursors, function)
 
 	__PARAMS__ = [
 		'key', 'label', 'materialize', 'safe', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
-		'precursors_hash', 'content_type', 'content_access_count'
+		'precursors_hash', 'content_type', 'content_access_count', 'backup_directory'
 	]
 
 	@property
@@ -104,7 +109,7 @@ class Memory:
 		"""
 		stale = self._stale
 		try:
-			function_dump = dill.dumps(obj=self._function, )
+			function_dump = dill.dumps(obj=self._function)
 		except RecursionError as e:
 			print(f'\nrecursion error during the dill.dumping of the "{self.key}" memory \n\n')
 			raise e
@@ -152,6 +157,13 @@ class Memory:
 				self._precursors_hash = None
 		self._function = dill.loads(str=state['function'])
 		self._pensieve = None
+
+	@property
+	def backup_directory(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		return self._backup_directory
 
 	def save(self, path):
 		"""
@@ -519,6 +531,79 @@ class Memory:
 		self._stale = False
 		self._precursors_hash = precursors_hash
 
+	@property
+	def backup_content_pickle_path(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		if self.backup_directory:
+			return (self.backup_directory + f'{self.key}_content.pickle')
+		else:
+			return None
+
+	@property
+	def backup_content_dill_path(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		if self.backup_directory:
+			return (self.backup_directory + f'{self.key}_content.dill')
+		else:
+			return None
+
+	def backup_content_exists(self):
+		return self.backup_content_pickle_path.exists() or self.backup_content_dill_path.exists()
+
+	@property
+	def backup_precursors_hash_path(self):
+		"""
+		:rtype: Path or NoneType
+		"""
+		if self.backup_directory:
+			return (self.backup_directory + f'{self.key}_hash.pickle')
+		else:
+			return None
+
+	@property
+	def backup_content(self):
+		if self.backup_directory:
+			if self.backup_content_pickle_path.exists():
+				return self.backup_content_pickle_path.load(method='pickle', echo=0)
+			elif self.backup_content_dill_path.exists():
+				return self.backup_content_dill_path.load(method='dill', echo=0)
+			else:
+				return None
+		else:
+			return None
+
+	@backup_content.setter
+	def backup_content(self, content):
+		if self.backup_directory:
+			try:
+				self.backup_content_pickle_path.save(obj=content, method='pickle', echo=0)
+			except:
+				if self.backup_content_pickle_path.exists():
+					self.backup_content_pickle_path.delete()
+				try:
+					self.backup_content_dill_path.save(obj=content, method='dill', echo=0)
+				except Exception as e:
+					if self.backup_content_dill_path.exists():
+						self.backup_content_dill_path.delete()
+					raise e
+
+	@property
+	def backup_precursors_hash(self):
+		if self.backup_directory and self.backup_precursors_hash_path.exists():
+			return self.backup_precursors_hash_path.load(method='pickle', echo=0)
+
+		else:
+			return None
+
+	@backup_precursors_hash.setter
+	def backup_precursors_hash(self, precursors_hash):
+		if self.backup_directory:
+			self.backup_precursors_hash_path.save(obj=precursors_hash, method='pickle', echo=0)
+
 	def mark_stale(self):
 		if self._materialize:
 			self._stale = True
@@ -555,9 +640,11 @@ class Memory:
 			precursor_keys_to_contents = {key: content for key, content in zip(keys, contents)}
 
 		if len(self.precursor_keys) == 0:
-			new_hash = hash_object(self._function)
+			new_hash = hash_object(get_source(self._function))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
+			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+				new_content = self.backup_content
 
 			else:
 				timer = Timer(start_now=True, unit='timedelta')
@@ -567,9 +654,11 @@ class Memory:
 
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
-			new_hash = hash_object((self._function, precursor_content))
+			new_hash = hash_object((get_source(self._function), precursor_content))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
+			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+				new_content = self.backup_content
 
 			else:
 				timer = Timer(start_now=True, unit='timedelta')
@@ -579,10 +668,11 @@ class Memory:
 
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-			new_hash = hash_object((self._function, inputs))
+			new_hash = hash_object((get_source(self._function), inputs))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
-
+			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+				new_content = self.backup_content
 			else:
 				timer = Timer(start_now=True, unit='timedelta')
 				new_content = self._function(inputs.originals)
@@ -593,6 +683,9 @@ class Memory:
 		self._content_type = get_type(new_content)
 
 		self._content_access_count += 1
+		if self.backup_directory and new_hash != self.backup_precursors_hash:
+			self.backup_content = new_content
+			self.backup_precursors_hash = new_hash
 		return new_content, new_hash
 
 	@property
