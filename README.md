@@ -1,4 +1,5 @@
 # *Pensieve*
+*Pensieve* is a Python library for organizing objects and dependencies in a graph structure.
 
 "*One simply siphons the excess thoughts from one's mind, pours them into the basin, and examines them at one's leisure. It becomes easier to spot patterns and links, you understand, when they are in this form.*"</br>
 &mdash;**Albus Dumbledore** (Harry Potter and the Goblet of Fire by J. K. Rowling)  
@@ -6,16 +7,13 @@
   <img src="http://idin.ca/storage/python/pensieve/images/pensieve_600.jpg"/>
 </p>
 
-
-
-
 ## Pensieve for Data
 
-In [J. K. Rowling](https://en.wikipedia.org/wiki/J._K._Rowling)'s words: 
+In [J. K. Rowling](https://en.wikipedia.org/wiki/J._K._Rowling)'s [words](https://en.wikipedia.org/wiki/Magical_objects_in_Harry_Potter#Pensieve): 
 "*a witch or wizard can **extract** their own or another's memories, **store** them in the [Pensieve](https://en.wikipedia.org/wiki/Magical_objects_in_Harry_Potter#Pensieve), 
 and **review** them later. It also **relieves the mind** when it becomes cluttered with information. 
 Anyone can **examine** the memories in the Pensieve, which also allows viewers to fully immerse 
-themselves in the memories*" [1](https://en.wikipedia.org/wiki/Magical_objects_in_Harry_Potter#Pensieve). 
+themselves in the memories*". 
 
 Dealing with data during data wrangling and model generation in data science is like dealing with memories 
 except that there is a lot more of back and forth and iteration when dealing with data. 
