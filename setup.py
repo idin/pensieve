@@ -1,6 +1,5 @@
 from setuptools import setup, find_packages
 
-
 def readme():
     with open('./README.md') as f:
         return f.read()
@@ -8,7 +7,7 @@ def readme():
 
 setup(
     name='pensieve',
-    version='2019.12.29.4',
+    version='2020.1.6',
     license='MIT',
 
     author='Idin',
@@ -16,7 +15,7 @@ setup(
     url='https://github.com/idin/pensieve',
 
     keywords='graph computation',
-    description='Implementation of a computation graph',
+    description='Python library for organizing objects and dependencies in a graph structure',
     long_description=readme(),
     long_description_content_type='text/markdown',
     classifiers=[
@@ -31,7 +30,5 @@ setup(
     packages=find_packages(exclude=("jupyter_tests", ".idea", ".git")),
     install_requires=['dill', 'toposort', 'disk', 'slytherin', 'chronometry', 'abstract', 'joblib', 'pandas'],
     python_requires='~=3.6',
-    zip_safe=True,
-    test_suite='nose.collector',
-    tests_require=['nose', 'coverage']
+    zip_safe=True
 )
