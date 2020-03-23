@@ -6,3 +6,5 @@ build/
 
 pensieve\.egg-info/
 pensieve/__pycache__
+*.lucy
+signature.lucy

@@ -429,6 +429,9 @@ class Pensieve:
 		return self._precursor_keys[memory_key]
 
 	def __getitem__(self, item):
+		if isinstance(item, (float, int)):
+			item = str(item)
+
 		if item in self._memories_dictionary:
 			memory = self._memories_dictionary[item]
 			if self._safe:
@@ -444,6 +447,8 @@ class Pensieve:
 			raise MissingMemoryError(f'Pensieve: the "{item}" memory does not exist!')
 
 	def __setitem__(self, key, value):
+		if isinstance(key, (int, float)):
+			key = str(key)
 
 		if isinstance(key, str):
 			if (hasattr(value, '__call__') or callable(value)) and not key.endswith('_function'):
