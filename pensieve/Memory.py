@@ -1,5 +1,6 @@
 from .EvaluationInput import EvaluationInput
 from .get_type import get_type
+from .get_schedule import get_schedule
 
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
@@ -17,7 +18,8 @@ from inspect import getsource as get_source
 
 class Memory:
 	def __init__(
-			self, key, pensieve, function, label=None, precursors=None, safe=True, metadata=False, materialize=True,
+			self, key, pensieve, function, _original_function,
+			label=None, precursors=None, safe=True, metadata=False, materialize=True,
 			_update=True, _stale=True
 	):
 		"""
@@ -48,6 +50,7 @@ class Memory:
 		self._deep_freezed = False
 		self._stale = _stale
 		self._function = function
+		self._original_function = _original_function
 		self._metadata = metadata or {}
 
 		self._total_time = None
@@ -56,13 +59,13 @@ class Memory:
 		self._precursors_hash = None
 		self._content_type = None
 		self._content_access_count = 0
-		if self.pensieve.backup_memory_directory:
+		if self.pensieve and self.pensieve.backup_memory_directory:
 			self._backup_directory = self.pensieve.backup_memory_directory.make_dir(name=self.key, ignore_if_exists=True)
 		else:
 			self._backup_directory = None
 
 		if _update:
-			self.update(precursors, function)
+			self.update(precursors=precursors, function=function, _original_function=_original_function)
 
 	__PARAMS__ = [
 		'key', 'label', 'materialize', 'safe', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
@@ -133,6 +136,32 @@ class Memory:
 			state['serialized_by'] = None
 
 		return state
+
+	@classmethod
+	def _backward_compatibile_from_state(cls, state):
+		memory = Memory(
+			key=state['key'],
+			function=dill.loads(str=state['function']),
+			pensieve=None,
+			precursors=None,
+			safe=state['safe'],
+			metadata=state['meta_data'],
+			_update=False, _stale=state['stale']
+		)
+		try:
+			memory._content = dill.loads(str=state['content'])
+		except Exception as e:
+			print(f'Could not load content for memory: "{memory.key}"')
+			print(f'Exception thrown:', e)
+			memory._content = None
+
+		memory._frozen = state['frozen']
+		memory._stale = state['stale']
+		memory._last_evaluated = state['last_evaluated']
+		memory._elapsed_seconds = state['elapsed_seconds']
+		if memory._content:
+			memory._content_type = get_type(memory._content)
+		return memory
 
 	def __setstate__(self, state):
 		"""
@@ -407,7 +436,7 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, label=None, metadata=None, materialize=None):
+	def update(self, precursors, function, _original_function, label=None, metadata=None, materialize=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
@@ -433,6 +462,7 @@ class Memory:
 			self.pensieve._successor_keys[precursor_key].append(self.key)
 
 		self._function = function
+		self._original_function = _original_function
 		self.mark_stale()
 
 		if metadata is not None:
@@ -484,22 +514,7 @@ class Memory:
 		"""
 		jobs = self.stale_dependencies
 		jobs.reverse()
-
-		added_to_schedule = []
-		schedule = []
-		while len(jobs) > 0:
-			job_round = []
-			for job in jobs:
-				if len(job.stale_precursors) == 0:
-					job_round.append(job)
-				elif all([dependency in added_to_schedule for dependency in job.stale_dependencies]):
-					job_round.append(job)
-
-			for job in job_round:
-				jobs.remove(job)
-			added_to_schedule += job_round
-			schedule.append(job_round)
-		return schedule
+		return get_schedule(jobs=jobs)
 
 	@property
 	def type_significance(self):
@@ -589,7 +604,6 @@ class Memory:
 				except Exception as e:
 					if self.backup_content_dill_path.exists():
 						self.backup_content_dill_path.delete()
-					raise e
 
 	@property
 	def backup_precursors_hash(self):
@@ -640,7 +654,7 @@ class Memory:
 			precursor_keys_to_contents = {key: content for key, content in zip(keys, contents)}
 
 		if len(self.precursor_keys) == 0:
-			new_hash = hash_object(get_source(self._function))
+			new_hash = hash_object(get_source(self._original_function))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
@@ -654,7 +668,7 @@ class Memory:
 
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
-			new_hash = hash_object((get_source(self._function), precursor_content))
+			new_hash = hash_object((get_source(self._original_function), precursor_keys_to_contents))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
@@ -668,7 +682,7 @@ class Memory:
 
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-			new_hash = hash_object((get_source(self._function), inputs))
+			new_hash = hash_object((get_source(self._original_function), precursor_keys_to_contents))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
@@ -687,6 +701,13 @@ class Memory:
 			self.backup_content = new_content
 			self.backup_precursors_hash = new_hash
 		return new_content, new_hash
+
+	@property
+	def hash(self):
+		"""
+		:rtype: str
+		"""
+		return self._precursors_hash
 
 	@property
 	def graphviz_edges_str(self):
