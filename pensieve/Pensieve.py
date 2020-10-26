@@ -1,11 +1,14 @@
 from .Memory import Memory
 from .create_pensieve_function import create_pensieve_function
 from .exceptions import *
+from .get_schedule import get_schedule
+
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_function_arguments
 from chronometry import MeasurementSet, convert
 from chronometry.progress import ProgressBar
 from joblib import Parallel
+from joblib import delayed
 
 from toposort import toposort
 import warnings
@@ -31,16 +34,17 @@ class Directory:
 			raise MissingMemoryError(f'{item} does not exist in pensieve')
 
 	def __dir__(self):
-		return self._pensieve.memories_dictionary.keys()
+		return list(self._pensieve.memories_dictionary.keys())
 
 
 class Pensieve:
 	def __init__(
-			self, safe=False, function_durations=None, warn_unsafe=False, hide_ignored=False,
-			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=True, echo=0
+			self, safe=False, name='Pensieve', function_durations=None, warn_unsafe=False, hide_ignored=False,
+			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=False, echo=0
 	):
 		"""
 		:param bool 	safe: 				if True, pensieve memories will be safe from mutations
+		:param str		name:				a name for pensieve
 		:param bool 	hide_ignored: 		if True, ignored nodes will be hidden
 		:param str 		graph_direction: 	'LR' for left to right, 'UD' for up-down
 		:param int 		num_threads: 		number of concurrent threads to use in processing, -1 for auto
@@ -57,6 +61,7 @@ class Pensieve:
 		if not safe and warn_unsafe:
 			warnings.warn('Memory contents can be mutated outside a safe pensieve!')
 		self._safe = safe
+		self._name = name
 		self._warn_safe = warn_unsafe
 		self._function_durations = function_durations or MeasurementSet()
 		self._directory = Directory(pensieve=self)
@@ -77,14 +82,56 @@ class Pensieve:
 			self._backup_directory = None
 			self._backup_memory_directory = None
 
-	_PARAMETERS_ = ['safe', 'warn_safe', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
+	_PARAMETERS_ = ['safe', 'name', 'warn_safe', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
 	_STATE_ATTRIBUTES_ = [
-		'_graph_direction',
+		'_graph_direction', '_name',
 		'_memories_dictionary', '_precursor_keys', '_successor_keys',
 		'_safe', '_warn_safe', '_function_durations', '_directory', '_hide_ignored',
 		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_materialize', '_echo',
 		'_backup_directory', '_backup_memory_directory'
 	]
+
+	def __getstate__(self):
+		return {key: getattr(self, key) for key in self._STATE_ATTRIBUTES_}
+
+	def _make_state_backward_compatibile(self, state):
+		result = {
+			'_memories_dictionary': {
+				memory_key: Memory._backward_compatibile_from_state(state=memory_state)
+				for memory_key, memory_state in state['memories'].items()
+			},
+			'_graph_direction': 'LR',
+			'_precursor_keys': state['precursor_keys'],
+			'_successor_keys': state['successor_keys'],
+			'_safe': state['safe'],
+			'_warn_safe': False,
+			'_function_durations': MeasurementSet(),
+			'_directory': Directory(pensieve=self),
+			'_hide_ignored': False,
+			'_num_intermediary_nodes': 0,
+			'_num_threads': 1,
+			'_evaluate': True,
+			'_materialize': True,
+			'_echo': 0,
+			'_backup_directory': None,
+			'_backup_memory_directory': None
+		}
+		return result
+
+	def __setstate__(self, state):
+		# backward compatibility
+		if all([key in state for key in ['memories', 'precursor_keys', 'successor_keys', 'safe']]):
+			state = self._make_state_backward_compatibile(state=state)
+
+		for key, value in state.items():
+			setattr(self, key, value)
+		for key in Pensieve._STATE_ATTRIBUTES_:
+			if key not in state:
+				print(f'missing attribute: {key}')
+				setattr(self, key, None)
+		for memory in self.memories_dictionary.values():
+			memory._pensieve = self
+		self._directory._pensieve = self
 
 	@property
 	def processor(self):
@@ -92,6 +139,59 @@ class Pensieve:
 		:rtype: NoneType or Parallel
 		"""
 		return Parallel(n_jobs=self._num_threads, backend='threading', require='sharedmem')
+
+	def get_update_schedule(self, keys):
+		jobs = []
+		for key in keys:
+			for job in self.memories_dictionary[key].stale_dependencies:
+				if job not in jobs:
+					jobs.append(job)
+		for key in keys:
+			if self.memories_dictionary[key].is_stale:
+				jobs.append(self.memories_dictionary[key])
+		return get_schedule(jobs=jobs)
+
+	def evaluate(self, keys=None, output=False):
+		"""
+		evaluates multiple memories, in parallel if num_threads != 1
+		:type keys: list[str] or NoneType or str
+		:type output: bool
+		:rtype: list or NoneType
+		"""
+		if keys is None:
+			keys = list(self.memories_dictionary.keys())
+		elif isinstance(keys, str):
+			keys = [keys]
+
+		if self._num_threads == 1:
+			if output:
+				return [self[key] for key in keys]
+			else:
+				for key in keys:
+					self.memories_dictionary[key].evaluate()
+		else:
+			def get_content(p):
+				return p.content
+
+			memories = [self.memories_dictionary[key] for key in keys]
+			schedule = self.get_update_schedule(keys=keys)
+
+			progress_bar = ProgressBar(
+				total=sum([len(schedule_round) for schedule_round in schedule]),
+				echo=self._echo
+			)
+
+			progress_amount = 0
+			for schedule_round in schedule:
+				progress_bar.show(amount=progress_amount, text=f'updating {len(schedule_round)} memories')
+				self.processor(delayed(get_content)(job) for job in schedule_round)
+				progress_amount += len(schedule_round)
+			if progress_amount > 0:
+				progress_bar.show(amount=progress_amount, text=f'{self.key} updated!')
+
+			contents = self.processor(delayed(get_content)(p) for p in memories)
+			if output:
+				return list(contents)
 
 	@property
 	def backup_directory(self):
@@ -182,16 +282,6 @@ class Pensieve:
 
 	def __hashkey__(self):
 		return self.__class__.__name__, self.parameters, self.__getstate__()
-
-	def __getstate__(self):
-		return {key: getattr(self, key) for key in self._STATE_ATTRIBUTES_}
-
-	def __setstate__(self, state):
-		for key, value in state.items():
-			setattr(self, key, value)
-		for memory in self.memories_dictionary.values():
-			memory._pensieve = self
-		self._directory._pensieve = self
 
 	def __getattr__(self, item):
 		return self.__getattribute__(item)
@@ -348,6 +438,13 @@ class Pensieve:
 
 	@property
 	def memories_dictionary(self):
+		"""
+		:rtype: dict[str,Memory]
+		"""
+		return self._memories_dictionary
+
+	@property
+	def memories(self):
 		"""
 		:rtype: dict[str,Memory]
 		"""
@@ -532,7 +629,9 @@ class Pensieve:
 
 		missing_from_precursors = [name for name in function_arguments if name not in precursors]
 		if len(missing_from_precursors) == 0 and len(precursors) > 1:
-			function = create_pensieve_function(function=function)
+			pensieve_function = create_pensieve_function(function=function)
+		else:
+			pensieve_function = function
 
 		number_of_precursors = len(precursors)
 		precursors = remove_list_duplicates(precursors)
@@ -556,17 +655,22 @@ class Pensieve:
 
 		if key in self._memories_dictionary:
 			memory = self._memories_dictionary[key]
+			if len(precursors) == 0:
+				memory._precursors_hash = None
+
 			memory.update(
 				label=label,
-				precursors=precursor_memories, function=function,
+				precursors=precursor_memories, function=pensieve_function,
 				metadata=metadata, materialize=materialize,
+				_original_function=function
 			)
 
 		else:
 			memory = Memory(
 				key=key, label=label, pensieve=self, safe=self._safe,
-				precursors=precursor_memories, function=function,
-				metadata=metadata, materialize=materialize
+				precursors=precursor_memories, function=pensieve_function,
+				metadata=metadata, materialize=materialize,
+				_original_function=function
 			)
 			self._memories_dictionary[key] = memory
 
@@ -680,6 +784,8 @@ class Pensieve:
 
 		return {
 			'colour_scheme': 'pensieve2',
+			'label': self._name,
+			'label_url': 'https://pypi.org/project/pensieve/',
 			'nodes': {key: memory.__graph_node__() for key, memory in memories_dictionary.items()},
 			'edges': [
 				(parent, child, {'style': {'line_width': self.memories_dictionary[parent].type_significance*5}})
@@ -718,10 +824,6 @@ class Pensieve:
 
 	def get_ancestors(self, memory):
 		return self._get_ancestors(memory=memory, memories_travelled=[])
-
-	def evaluate(self):
-		for memory in self.memories_dictionary.values():
-			memory.evaluate()
 
 	@property
 	def performance(self):
@@ -812,13 +914,3 @@ class Pensieve:
 		new_pensieve._precursor_keys = self._precursor_keys.copy()
 		new_pensieve._successor_keys = self._successor_keys.copy()
 		return new_pensieve
-
-	def get_update_schedule(self, key):
-		"""
-		:type key: str or Memory
-		:rtype:
-		"""
-		if isinstance(key, Memory):
-			return key.get_update_schedule()
-		else:
-			return self.memories_dictionary[key].get_update_schedule()
