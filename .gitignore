@@ -10,3 +10,5 @@ pensieve/__pycache__
 signature.lucy
 *.lucy
 *.lucy
+.ipynb_checkpoints
+Untitled.ipynb
