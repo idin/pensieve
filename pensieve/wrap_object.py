@@ -1,6 +1,3 @@
-from slytherin.hash import hash_object
-
-
 def wrap_object(obj, name):
 	class Wrap(obj.__class__):
 		def __init__(self, obj=None, name=None):

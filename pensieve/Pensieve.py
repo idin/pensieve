@@ -40,7 +40,8 @@ class Directory:
 class Pensieve:
 	def __init__(
 			self, safe=False, name='Pensieve', function_durations=None, warn_unsafe=False, hide_ignored=False,
-			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=False, echo=0
+			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=False, echo=0,
+			hash=True, n_jobs=1
 	):
 		"""
 		:param bool 	safe: 				if True, pensieve memories will be safe from mutations
@@ -71,6 +72,8 @@ class Pensieve:
 		self._evaluate = evaluate
 		self._materialize = materialize
 		self._echo = echo
+		self._do_hash = hash
+		self._n_jobs = n_jobs
 		if backup:
 			if isinstance(backup, bool):
 				backup = 'pensieve'
@@ -97,7 +100,7 @@ class Pensieve:
 	def _make_state_backward_compatibile(self, state):
 		result = {
 			'_memories_dictionary': {
-				memory_key: Memory._backward_compatibile_from_state(state=memory_state)
+				memory_key: Memory._backward_compatible_from_state(state=memory_state)
 				for memory_key, memory_state in state['memories'].items()
 			},
 			'_graph_direction': 'LR',
@@ -405,26 +408,51 @@ class Pensieve:
 		"""
 		return Graph(obj=self, direction=direction)
 
-	def display(self, p=None, dpi=300, hide_ignored=None, direction=None, path=None, height=None, width=None):
+	def display(self, p=None, dpi=300, hide_ignored=None, direction=None, pad=None, path=None, height=None, width=None):
 		if hide_ignored is None:
 			hide_ignored = self._hide_ignored
 		original_hide_ignored = self._hide_ignored
 		self._hide_ignored = hide_ignored
-		graph = self.get_graph(direction=direction)
+		graph = self.get_graph(direction=self._graph_direction)
 		self._hide_ignored = original_hide_ignored
 
 		if graph is None:
 			print(str(self))
 		else:
 			graph.display(
-				p=p, dpi=dpi, direction=direction or self._graph_direction, path=path, height=height, width=width
+				p=p, dpi=dpi, direction=direction or self._graph_direction, path=path, height=height, width=width,
+				pad=pad
 			)
+
+		if graph is None:
+			return None
+		else:
+			return graph.get_html(direction=direction, pad=pad)
+
+	def _repr_html_(self):
+		return self.get_svg()
 
 	def _repr_pretty_(self, p, cycle):
 		if cycle:
 			p.text('Pensieve')
 		else:
 			self.display(p=p)
+
+	def get_svg(self, direction=None, pad=None, **kwargs):
+		"""
+		:type direction: NoneType or str
+		:type pad: NoneType or int or float
+		:rtype: str
+		"""
+		return self.get_graph(direction=self._graph_direction).get_svg(direction=direction, pad=pad, **kwargs)
+
+	def get_html(self, direction=None, pad=None, **kwargs):
+		return self.get_graph(direction=self._graph_direction).get_html(direction=direction, pad=pad, **kwargs)
+
+	def display_html(self, direction=None, pad=None, **kwargs):
+		graph = self.get_graph(direction=self._graph_direction)
+		graph.display_html(direction=direction, pad=pad, **kwargs)
+		return graph.get_html(direction=direction, pad=pad, **kwargs)
 
 	def __contains__(self, item):
 		"""
@@ -670,7 +698,7 @@ class Pensieve:
 				key=key, label=label, pensieve=self, safe=self._safe,
 				precursors=precursor_memories, function=pensieve_function,
 				metadata=metadata, materialize=materialize,
-				_original_function=function
+				_original_function=function, hash=self._do_hash, n_jobs=self._n_jobs
 			)
 			self._memories_dictionary[key] = memory
 

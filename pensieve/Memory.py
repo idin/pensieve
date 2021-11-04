@@ -4,12 +4,13 @@ from .get_schedule import get_schedule
 
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
-from slytherin.hash import hash_object
+from memoria import hash_object
 from chronometry import Timer
 from disk import Path
 from joblib import delayed
 from chronometry.progress import ProgressBar
 from pandas import DataFrame, Series
+from random import random
 
 import dill
 import pickle
@@ -20,7 +21,7 @@ class Memory:
 	def __init__(
 			self, key, pensieve, function, _original_function,
 			label=None, precursors=None, safe=True, metadata=False, materialize=True,
-			_update=True, _stale=True
+			_update=True, _stale=True, hash=True, n_jobs=1
 	):
 		"""
 		:param str key: unique name/identifier of the memory
@@ -59,6 +60,8 @@ class Memory:
 		self._precursors_hash = None
 		self._content_type = None
 		self._content_access_count = 0
+		self._do_hash = hash
+		self._n_jobs = n_jobs
 		if self.pensieve and self.pensieve.backup_memory_directory:
 			self._backup_directory = self.pensieve.backup_memory_directory.make_dir(name=self.key, ignore_if_exists=True)
 		else:
@@ -138,7 +141,7 @@ class Memory:
 		return state
 
 	@classmethod
-	def _backward_compatibile_from_state(cls, state):
+	def _backward_compatible_from_state(cls, state):
 		memory = Memory(
 			key=state['key'],
 			function=dill.loads(str=state['function']),
@@ -625,6 +628,12 @@ class Memory:
 		for successor in self.successors:
 			successor.mark_stale()
 
+	def hash_object(self, obj):
+		if self._do_hash:
+			return hash_object(obj=obj, n_jobs=self._n_jobs, base=64)
+		else:
+			return str(random())
+
 	def get_content_and_hash(self):
 		if self.num_threads == 1:
 			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
@@ -654,7 +663,8 @@ class Memory:
 			precursor_keys_to_contents = {key: content for key, content in zip(keys, contents)}
 
 		if len(self.precursor_keys) == 0:
-			new_hash = hash_object(get_source(self._original_function))
+			new_hash = self.hash_object(get_source(self._original_function))
+
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
@@ -668,7 +678,7 @@ class Memory:
 
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
-			new_hash = hash_object((get_source(self._original_function), precursor_keys_to_contents))
+			new_hash = self.hash_object((get_source(self._original_function), precursor_keys_to_contents))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
@@ -682,7 +692,7 @@ class Memory:
 
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-			new_hash = hash_object((get_source(self._original_function), precursor_keys_to_contents))
+			new_hash = self.hash_object((get_source(self._original_function), precursor_keys_to_contents))
 			if new_hash == self._precursors_hash and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
