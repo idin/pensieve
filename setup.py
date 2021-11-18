@@ -7,7 +7,7 @@ def readme():
 
 setup(
     name='pensieve',
-    version='2021.9.30',
+    version='2021.11.18',
     license='MIT',
 
     author='Idin',
