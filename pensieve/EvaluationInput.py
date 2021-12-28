@@ -1,6 +1,3 @@
-from slytherin.immutability import Immutable
-
-
 class UnprotectedEvaluationInput:
 	def __init__(self, inputs):
 		"""
@@ -32,10 +29,7 @@ class UnprotectedEvaluationInput:
 	@property
 	def originals(self):
 		return self.__class__(
-			inputs={
-				key: value.original_object if isinstance(value, Immutable) else value
-				for key, value in self._dictionary.items()
-			}
+			inputs=self._dictionary
 		)
 
 
