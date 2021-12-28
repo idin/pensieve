@@ -1,4 +1,3 @@
-from slytherin.immutability import Immutable
 from collections import Counter
 
 BUILTIN_TYPES = {
@@ -17,8 +16,6 @@ BUILTIN_TYPES = {
 
 
 def _get_type(x):
-	if isinstance(x, Immutable):
-		x = x._original_object
 	name = type(x).__name__
 	return BUILTIN_TYPES.get(name, name)
 

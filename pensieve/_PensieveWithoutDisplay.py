@@ -217,7 +217,7 @@ class PensieveWithoutDisplay:
 
 			if key in self.memories_dictionary and key not in other.memories_dictionary:
 				new_memory = self.memories_dictionary[key].partial_copy(
-					include_function=True, include_precursor_hash=False,
+					include_function=True, include_precursor_reference=False,
 					stale=self.memories_dictionary[key].is_stale
 				)
 				precursor_keys[key] = self._precursor_keys[key].copy()
@@ -227,7 +227,7 @@ class PensieveWithoutDisplay:
 
 			elif key in other.memories_dictionary and key not in self.memories_dictionary:
 				new_memory = other.memories_dictionary[key].partial_copy(
-					include_function=True, include_precursor_hash=False,
+					include_function=True, include_precursor_reference=False,
 					stale=other.memories_dictionary[key].is_stale
 				)
 				precursor_keys[key] = other._precursor_keys[key].copy()
@@ -241,13 +241,13 @@ class PensieveWithoutDisplay:
 
 				if not right_memory.has_precursors:
 					new_memory = left_memory.partial_copy(
-						include_function=True, include_precursor_hash=False, stale=True
+						include_function=True, include_precursor_reference=False, stale=True
 					)
 					precursor_keys[key] = self._precursor_keys[key].copy()
 
 				elif not left_memory.has_precursors:
 					new_memory = right_memory.partial_copy(
-						include_function=True, include_precursor_hash=False, stale=True
+						include_function=True, include_precursor_reference=False, stale=True
 					)
 					precursor_keys[key] = other._precursor_keys[key].copy()
 
@@ -636,7 +636,7 @@ class PensieveWithoutDisplay:
 		if key in self._memories_dictionary:
 			memory = self._memories_dictionary[key]
 			if len(precursors) == 0:
-				memory._precursors_hash = None
+				memory._precursors_reference = None
 
 			memory.update(
 				label=label,
@@ -650,7 +650,7 @@ class PensieveWithoutDisplay:
 				key=key, label=label, pensieve=self, safe=self._safe,
 				precursors=precursor_memories, function=pensieve_function,
 				metadata=metadata, materialize=materialize,
-				_original_function=function, hash=self._do_hash, n_jobs=self._n_jobs
+				_original_function=function, n_jobs=self._n_jobs
 			)
 			self._memories_dictionary[key] = memory
 

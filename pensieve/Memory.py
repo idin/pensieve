@@ -4,13 +4,11 @@ from .get_schedule import get_schedule
 
 from slytherin.collections import remove_list_duplicates
 from slytherin import get_size
-from memoria import hash_object
 from chronometry import Timer
 from disk import Path
 from joblib import delayed
 from chronometry.progress import ProgressBar
 from pandas import DataFrame, Series
-from random import random
 
 import dill
 import pickle
@@ -21,7 +19,7 @@ class Memory:
 	def __init__(
 			self, key, pensieve, function, _original_function,
 			label=None, precursors=None, safe=True, metadata=False, materialize=True,
-			_update=True, _stale=True, hash=True, n_jobs=1
+			_update=True, _stale=True, n_jobs=1
 	):
 		"""
 		:param str key: unique name/identifier of the memory
@@ -48,7 +46,7 @@ class Memory:
 			if self.key not in self.pensieve._precursor_keys:
 				self.pensieve._precursor_keys[self.key] = []
 		self._frozen = False
-		self._deep_freezed = False
+		self._deep_frozen = False
 		self._stale = _stale
 		self._function = function
 		self._original_function = _original_function
@@ -57,10 +55,9 @@ class Memory:
 		self._total_time = None
 
 		self._size = None
-		self._precursors_hash = None
+		self._precursors_reference = None
 		self._content_type = None
 		self._content_access_count = 0
-		self._do_hash = hash
 		self._n_jobs = n_jobs
 		if self.pensieve and self.pensieve.backup_memory_directory:
 			self._backup_directory = self.pensieve.backup_memory_directory.make_dir(name=self.key, ignore_if_exists=True)
@@ -72,7 +69,7 @@ class Memory:
 
 	__PARAMS__ = [
 		'key', 'label', 'materialize', 'safe', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
-		'precursors_hash', 'content_type', 'content_access_count', 'backup_directory'
+		'precursors_reference', 'content_type', 'content_access_count', 'backup_directory'
 	]
 
 	@property
@@ -86,18 +83,18 @@ class Memory:
 			function=self._function if include_function else None,
 			precursors=None,
 			safe=self._safe, metadata=self._metadata.copy(),
-			materialize=self._materialize, _update=update, _stale=stale
+			materialize=self._materialize, _update=update, _stale=stale, _original_function=self._original_function
 		)
 		return result
 
-	def partial_copy(self, include_function=False, stale=False, update=False, include_precursor_hash=True):
+	def partial_copy(self, include_function=False, stale=False, update=False, include_precursor_reference=True):
 		result = self.clean_copy(include_function=include_function, stale=stale, update=update)
 		result._content = self._content
 		result._content = self._content
 		result._frozen = self._frozen
 		result._total_time = self._total_time
 		result._size = self._size
-		result._precursors_hash = self._precursors_hash if include_precursor_hash else None
+		result._precursors_reference = self._precursors_reference if include_precursor_reference else None
 		result._content_type = self._content_type
 		result._content_access_count = self._content_access_count
 		return result
@@ -175,7 +172,7 @@ class Memory:
 			setattr(self, f'_{name}', value)
 		if self._stale:
 			self._content = None
-			self._precursors_hash = None
+			self._precursors_reference = None
 		else:
 			if state['serialized_by'] == 'dill':
 				self._content = dill.loads(str=state['serialized'])
@@ -186,7 +183,7 @@ class Memory:
 			else:
 				self._stale = True
 				self._content = None
-				self._precursors_hash = None
+				self._precursors_reference = None
 		self._function = dill.loads(str=state['function'])
 		self._pensieve = None
 
@@ -239,7 +236,7 @@ class Memory:
 			'evaluation_time': self.evaluation_time,
 			'total_time': self.total_time,
 			'size': self.size,
-			'precursors_hash': self._precursors_hash,
+			'precursors_reference': self._precursors_reference,
 			'precursors': self.precursor_keys
 		}
 		for key, value in self._metadata:
@@ -253,7 +250,7 @@ class Memory:
 			result = 0
 			result += get_size(self._key, exclude_objects=[self._pensieve])
 			result += get_size(self._content, exclude_objects=[self._pensieve])
-			result += get_size(self._precursors_hash, exclude_objects=[self._pensieve])
+			result += get_size(self._precursors_reference, exclude_objects=[self._pensieve])
 			result += get_size(self._content_type, exclude_objects=[self._pensieve])
 			result += get_size(self._safe, exclude_objects=[self._pensieve])
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
@@ -349,7 +346,7 @@ class Memory:
 
 	def freeze(self, forever=False):
 		self._frozen = True
-		self._deep_freezed = forever
+		self._deep_frozen = forever
 		if forever:
 			self._function = None
 
@@ -357,7 +354,7 @@ class Memory:
 		self.freeze(forever=True)
 
 	def unfreeze(self):
-		if not self._deep_freezed:
+		if not self._deep_frozen:
 			self._frozen = False
 			if self._stale:
 				self.mark_stale()
@@ -379,7 +376,7 @@ class Memory:
 	def label(self):
 		output = self._label or self.key.replace('__', '\n').replace('_', ' ')
 
-		if self._deep_freezed:
+		if self._deep_frozen:
 			frozen_label = 'deep-freezed'
 		else:
 			frozen_label = 'frozen'
@@ -390,7 +387,7 @@ class Memory:
 			output += '\n( stale )'
 		elif not self.is_stale and self.is_frozen:
 			output += f'\n( {frozen_label} )'
-		else:
+		elif self.pensieve._show_types:
 			output += f'\n{self._content_type}'
 
 		return output
@@ -529,25 +526,25 @@ class Memory:
 	@property
 	def content(self):
 		if not self._materialize:
-			self.set_content(content=None, precursors_hash=None)
-			content, precursors_hash = self.get_content_and_hash()
+			self.set_content(content=None, precursors_reference=None)
+			content, precursors_reference = self.get_content_and_reference()
 
 		elif self.is_frozen or not self.is_stale:
 			content = self._content
 
 		else:
-			content, precursors_hash = self.get_content_and_hash()
-			self.set_content(content=content, precursors_hash=precursors_hash)
+			content, precursors_reference = self.get_content_and_reference()
+			self.set_content(content=content, precursors_reference=precursors_reference)
 			content = self._content
 
 		return content
 
-	def set_content(self, content, precursors_hash):
+	def set_content(self, content, precursors_reference):
 		if self.is_frozen:
 			raise MemoryError(f'{self.key} is frozen. You cannot change a frozen memory!')
 		self._content = content
 		self._stale = False
-		self._precursors_hash = precursors_hash
+		self._precursors_reference = precursors_reference
 
 	@property
 	def backup_content_pickle_path(self):
@@ -573,7 +570,7 @@ class Memory:
 		return self.backup_content_pickle_path.exists() or self.backup_content_dill_path.exists()
 
 	@property
-	def backup_precursors_hash_path(self):
+	def backup_precursors_reference_path(self):
 		"""
 		:rtype: Path or NoneType
 		"""
@@ -609,17 +606,17 @@ class Memory:
 						self.backup_content_dill_path.delete()
 
 	@property
-	def backup_precursors_hash(self):
-		if self.backup_directory and self.backup_precursors_hash_path.exists():
-			return self.backup_precursors_hash_path.load(method='pickle', echo=0)
+	def backup_precursors_reference(self):
+		if self.backup_directory and self.backup_precursors_reference_path.exists():
+			return self.backup_precursors_reference_path.load(method='pickle', echo=0)
 
 		else:
 			return None
 
-	@backup_precursors_hash.setter
-	def backup_precursors_hash(self, precursors_hash):
+	@backup_precursors_reference.setter
+	def backup_precursors_reference(self, precursors_reference):
 		if self.backup_directory:
-			self.backup_precursors_hash_path.save(obj=precursors_hash, method='pickle', echo=0)
+			self.backup_precursors_reference_path.save(obj=precursors_reference, method='pickle', echo=0)
 
 	def mark_stale(self):
 		if self._materialize:
@@ -628,13 +625,7 @@ class Memory:
 		for successor in self.successors:
 			successor.mark_stale()
 
-	def hash_object(self, obj):
-		if self._do_hash:
-			return hash_object(obj=obj, n_jobs=self._n_jobs, base=64)
-		else:
-			return str(random())
-
-	def get_content_and_hash(self):
+	def get_content_and_reference(self):
 		if self.num_threads == 1:
 			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
 		else:
@@ -663,11 +654,11 @@ class Memory:
 			precursor_keys_to_contents = {key: content for key, content in zip(keys, contents)}
 
 		if len(self.precursor_keys) == 0:
-			new_hash = self.hash_object(get_source(self._original_function))
+			new_reference = get_source(self._original_function)
 
-			if new_hash == self._precursors_hash and self._materialize:
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
-			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
 
 			else:
@@ -678,10 +669,10 @@ class Memory:
 
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
-			new_hash = self.hash_object((get_source(self._original_function), precursor_keys_to_contents))
-			if new_hash == self._precursors_hash and self._materialize:
+			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
-			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
 
 			else:
@@ -692,10 +683,10 @@ class Memory:
 
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
-			new_hash = self.hash_object((get_source(self._original_function), precursor_keys_to_contents))
-			if new_hash == self._precursors_hash and self._materialize:
+			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
-			elif self.backup_directory and new_hash == self.backup_precursors_hash and self.backup_content_exists():
+			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
 			else:
 				timer = Timer(start_now=True, unit='timedelta')
@@ -707,17 +698,10 @@ class Memory:
 		self._content_type = get_type(new_content)
 
 		self._content_access_count += 1
-		if self.backup_directory and new_hash != self.backup_precursors_hash:
+		if self.backup_directory and new_reference != self.backup_precursors_reference:
 			self.backup_content = new_content
-			self.backup_precursors_hash = new_hash
-		return new_content, new_hash
-
-	@property
-	def hash(self):
-		"""
-		:rtype: str
-		"""
-		return self._precursors_hash
+			self.backup_precursors_reference = new_reference
+		return new_content, new_reference
 
 	@property
 	def graphviz_edges_str(self):
