@@ -15,26 +15,7 @@ import warnings
 from copy import deepcopy
 from disk import Path
 from abstract import Graph
-
-
-class Directory:
-	def __init__(self, pensieve):
-		self._pensieve = pensieve
-
-	def __getstate__(self):
-		return {}
-
-	def __setstate__(self, state):
-		pass
-
-	def __getattr__(self, item):
-		if item in self._pensieve.memories_dictionary:
-			return item
-		else:
-			raise MissingMemoryError(f'{item} does not exist in pensieve')
-
-	def __dir__(self):
-		return list(self._pensieve.memories_dictionary.keys())
+import re
 
 
 class PensieveWithoutDisplay:
@@ -66,7 +47,6 @@ class PensieveWithoutDisplay:
 		self._name = name
 		self._warn_safe = warn_unsafe
 		self._function_durations = function_durations or MeasurementSet()
-		self._directory = Directory(pensieve=self)
 		self._hide_ignored = hide_ignored
 		self._num_intermediary_nodes = 0
 		self._num_threads = num_threads
@@ -110,7 +90,6 @@ class PensieveWithoutDisplay:
 			'_safe': state['safe'],
 			'_warn_safe': False,
 			'_function_durations': MeasurementSet(),
-			'_directory': Directory(pensieve=self),
 			'_hide_ignored': False,
 			'_num_intermediary_nodes': 0,
 			'_num_threads': 1,
@@ -322,7 +301,7 @@ class PensieveWithoutDisplay:
 		progress_bar = ProgressBar(total=len(self.memories_dictionary)+2, echo=echo)
 		progress_amount = 0
 
-		path = Path(string=path)
+		path = Path(path=path)
 		path.make_dir()
 
 		progress_bar.show(amount=progress_amount, text='saving parameters')
@@ -345,7 +324,7 @@ class PensieveWithoutDisplay:
 
 	@classmethod
 	def load(cls, path, echo=True):
-		path = Path(string=path)
+		path = Path(path=path)
 		parameters = (path + 'parameters.pensieve').load()
 		pensieve = cls(safe=parameters['safe'])
 		for name, value in parameters.items():
@@ -576,8 +555,16 @@ class PensieveWithoutDisplay:
 			else:
 				raise TypeError(f'result can only be of type list, tuple, or dict but it is of type {type(intermediary_value)}')
 
-	def key_allowed(self, key):
-		return key not in dir(self)
+	def _key_allowed(self, key):
+		if not isinstance(key, str):
+			return False
+		if len(key) == 0:
+			return False
+		if key.startswith('_') or key.endswith('_') or key[0].isdigit():
+			return False
+		if not re.match(r'^[A-Za-z0-9_]+$', key):
+			return False
+		return True
 
 	def store(
 			self, key, label=None, function=None, content=None, precursors=None,
@@ -616,7 +603,7 @@ class PensieveWithoutDisplay:
 		if not key:
 			raise StoringError(f'Pensieve: no key provided for memory!')
 
-		if not self.key_allowed(key=key):
+		if not self._key_allowed(key=key):
 			raise IllegalKeyError(f'{key} cannot be used as a memory key!')
 
 		# if all function variables are in precursors this is not a standard pensieve function and needs to be converted

@@ -201,7 +201,7 @@ class Memory:
 		"""
 		:type path: str or Path
 		"""
-		path = Path(string=path)
+		path = Path(path=path)
 		path.make_dir()
 		parameters = {param: getattr(self, f'_{param}') for param in self.__PARAMS__}
 		try:
@@ -213,7 +213,7 @@ class Memory:
 
 	@classmethod
 	def load(cls, path, pensieve):
-		path = Path(string=path)
+		path = Path(path=path)
 		parameters = (path + 'parameters.pensieve').load()
 		function = (path + 'function.pensieve').load(method='dill')
 		memory = cls(
