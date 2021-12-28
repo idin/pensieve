@@ -22,7 +22,7 @@ class PensieveWithoutDisplay:
 	def __init__(
 			self, safe=False, name='Pensieve', function_durations=None, warn_unsafe=False, hide_ignored=False,
 			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=False, echo=0,
-			hash=True, n_jobs=1
+			n_jobs=1, show_types=True
 	):
 		"""
 		:param bool 	safe: 				if True, pensieve memories will be safe from mutations
@@ -37,7 +37,7 @@ class PensieveWithoutDisplay:
 		:param bool or int or ProgressBar 			echo: 					int or ProgressBar or bool
 		"""
 		self._graph_direction = None
-		self.graph_direction = graph_direction
+		self.set_graph_direction(graph_direction)
 		self._memories_dictionary = {}
 		self._precursor_keys = {}
 		self._successor_keys = {}
@@ -53,8 +53,8 @@ class PensieveWithoutDisplay:
 		self._evaluate = evaluate
 		self._materialize = materialize
 		self._echo = echo
-		self._do_hash = hash
 		self._n_jobs = n_jobs
+		self._show_types = show_types
 		if backup:
 			if isinstance(backup, bool):
 				backup = 'pensieve'
@@ -116,22 +116,14 @@ class PensieveWithoutDisplay:
 			memory._pensieve = self
 		self._directory._pensieve = self
 
-	@property
-	def graph_direction(self):
+	def set_graph_direction(self, direction):
 		"""
-		:rtype: str
+		:type direction: str
 		"""
-		return self._graph_direction
-
-	@graph_direction.setter
-	def graph_direction(self, value):
-		"""
-		:type value: str
-		"""
-		value = value.upper()
-		if value not in ['LR', 'RL', 'TB', 'BT']:
-			raise ValueError(f'Unsupported graph direction: {value}')
-		self._graph_direction = value
+		direction = direction.upper()
+		if direction not in ['LR', 'RL', 'TB', 'BT']:
+			raise ValueError(f'Unsupported graph direction: {direction}')
+		self._graph_direction = direction
 
 	@property
 	def processor(self):
@@ -214,7 +206,7 @@ class PensieveWithoutDisplay:
 		"""
 		new_pensieve = self.__class__(
 			safe=self._safe, function_durations=self.function_durations, warn_unsafe=self._warn_safe,
-			hide_ignored=self._hide_ignored, graph_direction=self.graph_direction
+			hide_ignored=self._hide_ignored, graph_direction=self._graph_direction
 		)
 		memories_dictionary = {}
 		precursor_keys = {}
@@ -403,7 +395,8 @@ class PensieveWithoutDisplay:
 		:type direction: str
 		:rtype: Graph
 		"""
-		return Graph(obj=self, direction=direction or self.graph_direction)
+		direction = direction or self._graph_direction
+		return Graph(obj=self, direction=direction)
 
 	def __contains__(self, item):
 		"""
