@@ -18,7 +18,7 @@ from inspect import getsource as get_source
 class Memory:
 	def __init__(
 			self, key, pensieve, function, _original_function,
-			label=None, precursors=None, safe=True, metadata=False, materialize=True,
+			label=None, precursors=None, safe=True, metadata=False, lazy=False,
 			_update=True, _stale=True, n_jobs=1
 	):
 		"""
@@ -28,7 +28,7 @@ class Memory:
 		:param list[Memory] or NoneType precursors: precursor memories to this memory
 		:param bool safe: when True only a copy of the content is returned to avoid mutating it from outside
 		:param dict metadata: an optional dictionary that carries meta data about this memory
-		:param bool materialize: when False, memory runs the function when it needs the content, rather than keeping it
+		:param bool lazy: when True, memory runs the function when it needs the content, rather than keeping it
 		:param bool _update: if True the precursors will be updated
 		:param bool _stale:
 		"""
@@ -38,7 +38,7 @@ class Memory:
 		self._label = label
 		self._pensieve = pensieve
 		self._content = None
-		self._materialize = materialize
+		self._lazy = lazy
 		self._safe = safe
 		if self.pensieve is not None:
 			if self.key not in self.pensieve._successor_keys:
@@ -73,8 +73,8 @@ class Memory:
 	]
 
 	@property
-	def num_threads(self):
-		return self.pensieve._num_threads
+	def n_jobs(self):
+		return self.pensieve._n_jobs
 
 	def clean_copy(self, include_function=False, stale=False, update=False):
 
@@ -83,7 +83,7 @@ class Memory:
 			function=self._function if include_function else None,
 			precursors=None,
 			safe=self._safe, metadata=self._metadata.copy(),
-			materialize=self._materialize, _update=update, _stale=stale, _original_function=self._original_function
+			lazy=self._lazy, _update=update, _stale=stale, _original_function=self._original_function
 		)
 		return result
 
@@ -231,7 +231,7 @@ class Memory:
 		result = {
 			'key': self.key,
 			'content_type': self._content_type,
-			'materialized': self._materialize,
+			'lazy': self._lazy,
 			'frozen': self._frozen,
 			'evaluation_time': self.evaluation_time,
 			'total_time': self.total_time,
@@ -359,7 +359,7 @@ class Memory:
 			if self._stale:
 				self.mark_stale()
 		else:
-			print(f'{self.key} is deep-freezed and cannot be thawed!')
+			print(f'{self.key} is deep-frozen and cannot be thawed!')
 
 	@property
 	def pensieve(self):
@@ -377,7 +377,7 @@ class Memory:
 		output = self._label or self.key.replace('__', '\n').replace('_', ' ')
 
 		if self._deep_frozen:
-			frozen_label = 'deep-freezed'
+			frozen_label = 'deep-frozen'
 		else:
 			frozen_label = 'frozen'
 
@@ -436,12 +436,12 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, _original_function, label=None, metadata=None, materialize=None):
+	def update(self, precursors, function, _original_function, label=None, metadata=None, lazy=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
 		:type metadata: NoneType or dict
-		:type materialize: bool or NoneType
+		:type lazy: bool or NoneType
 		"""
 		# make precursors unique:
 		if self.is_frozen:
@@ -467,8 +467,8 @@ class Memory:
 
 		if metadata is not None:
 			self._metadata = metadata
-		if materialize is not None:
-			self._materialize = materialize
+		if lazy is not None:
+			self._lazy = lazy
 
 		if label is not None:
 			self._label = label
@@ -525,16 +525,15 @@ class Memory:
 
 	@property
 	def content(self):
-		if not self._materialize:
-			self.set_content(content=None, precursors_reference=None)
-			content, precursors_reference = self.get_content_and_reference()
-
-		elif self.is_frozen or not self.is_stale:
+		if self.is_stale:
+			print(f'{self.key} is stale!')
+		if self.is_frozen or not self.is_stale:
 			content = self._content
 
 		else:
 			content, precursors_reference = self.get_content_and_reference()
 			self.set_content(content=content, precursors_reference=precursors_reference)
+			self.mark_fresh()
 			content = self._content
 
 		return content
@@ -543,7 +542,6 @@ class Memory:
 		if self.is_frozen:
 			raise MemoryError(f'{self.key} is frozen. You cannot change a frozen memory!')
 		self._content = content
-		self._stale = False
 		self._precursors_reference = precursors_reference
 
 	@property
@@ -619,14 +617,19 @@ class Memory:
 			self.backup_precursors_reference_path.save(obj=precursors_reference, method='pickle', echo=0)
 
 	def mark_stale(self):
-		if self._materialize:
-			self._stale = True
+		#if not self._lazy:
+		print(f'marking {self.key} stale')
+		self._stale = True
 		self._size = None
 		for successor in self.successors:
 			successor.mark_stale()
 
+	def mark_fresh(self):
+		print(f'marking {self.key} fresh')
+		self._stale = False
+
 	def get_content_and_reference(self):
-		if self.num_threads == 1:
+		if self.n_jobs == 1:
 			precursor_keys_to_contents = {p.key: p.content for p in self.precursors}
 		else:
 			def get_content(p):
@@ -656,8 +659,9 @@ class Memory:
 		if len(self.precursor_keys) == 0:
 			new_reference = get_source(self._original_function)
 
-			if new_reference == self._precursors_reference and self._materialize:
+			if new_reference == self._precursors_reference and not self.is_stale:
 				new_content = self._content
+
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
 
@@ -670,8 +674,10 @@ class Memory:
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and self._materialize:
+
+			if new_reference == self._precursors_reference and not self.is_stale:
 				new_content = self._content
+
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
 
@@ -684,7 +690,7 @@ class Memory:
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and self._materialize:
+			if new_reference == self._precursors_reference and not self.is_stale:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
