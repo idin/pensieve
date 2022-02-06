@@ -21,7 +21,7 @@ import re
 class PensieveWithoutDisplay:
 	def __init__(
 			self, safe=False, name='Pensieve', function_durations=None, warn_unsafe=False, hide_ignored=False,
-			graph_direction='LR', num_threads=1, evaluate=True, materialize=True, backup=False, echo=0,
+			graph_direction='LR', num_threads=1, evaluate=True, lazy=False, backup=False, echo=0,
 			n_jobs=1, show_types=True
 	):
 		"""
@@ -51,7 +51,7 @@ class PensieveWithoutDisplay:
 		self._num_intermediary_nodes = 0
 		self._num_threads = num_threads
 		self._evaluate = evaluate
-		self._materialize = materialize
+		self._materialize = not lazy
 		self._echo = echo
 		self._n_jobs = n_jobs
 		self._show_types = show_types
@@ -525,7 +525,7 @@ class PensieveWithoutDisplay:
 
 			else:
 				self.store(
-					key=key, function=None, content=value, precursors=None, materialize=None, evaluate=None,
+					key=key, function=None, content=value, precursors=None, lazy=None, evaluate=None,
 					metadata=None
 				)
 		elif isinstance(key, (list, tuple)):
@@ -561,7 +561,7 @@ class PensieveWithoutDisplay:
 
 	def store(
 			self, key, label=None, function=None, content=None, precursors=None,
-			materialize=None, evaluate=None, metadata=None
+			lazy=None, evaluate=None, metadata=None
 	):
 		"""
 		:param str key: key to the new memory
@@ -569,23 +569,23 @@ class PensieveWithoutDisplay:
 		:param callable function: a function that runs on precursors and produces a new memory
 		:param content: any object
 		:param list[str] or NoneType precursors: key to precursor memories
-		:param bool or NoneType materialize: if False, the memory does not store but only passes the results of the function
+		:param bool or NoneType lazy: if True, the memory does not store but only passes the results of the function
 		:param bool or NoneType evaluate: if False the memory will not be evaluated
 		:param dict or NoneType metadata: any information on the memory
 		"""
 		if evaluate is None:
 			evaluate = self._evaluate
 
-		if materialize is None:
+		if lazy is None:
 			if function is None:
-				materialize = True
+				lazy = False
 			else:
-				materialize = self._materialize
+				lazy = not self._materialize
 
 		if function is not None and content is not None:
 			raise StoringError('Pensieve: at least one of function and content should be None!')
 		elif function is None:
-			if not materialize:
+			if lazy:
 				raise StoringError('Pensieve: the content has to be materialized!')
 
 			def function():
@@ -641,7 +641,7 @@ class PensieveWithoutDisplay:
 			memory.update(
 				label=label,
 				precursors=precursor_memories, function=pensieve_function,
-				metadata=metadata, materialize=materialize,
+				metadata=metadata, lazy=lazy,
 				_original_function=function
 			)
 
@@ -649,12 +649,12 @@ class PensieveWithoutDisplay:
 			memory = Memory(
 				key=key, label=label, pensieve=self, safe=self._safe,
 				precursors=precursor_memories, function=pensieve_function,
-				metadata=metadata, materialize=materialize,
+				metadata=metadata, lazy=lazy,
 				_original_function=function, n_jobs=self._n_jobs
 			)
 			self._memories_dictionary[key] = memory
 
-		if evaluate and materialize:
+		if evaluate and not lazy:
 			memory = self.memories_dictionary[key]
 			memory.evaluate()  # this will update the content if necessary
 
@@ -834,7 +834,7 @@ class PensieveWithoutDisplay:
 		"""
 		return self._function_durations
 
-	def decouple(self, key, prefix=None, suffix=None, precursors=None, separator='_', evaluate=None, materialize=None):
+	def decouple(self, key, prefix=None, suffix=None, precursors=None, separator='_', evaluate=None, lazy=None):
 		"""
 		decouples a dictionary memory into its items as new memories and returns the names of new memories
 		:param str key: key of the original memory
@@ -844,7 +844,7 @@ class PensieveWithoutDisplay:
 		be considered in case changes do not automatically make this memory stale
 		:param str separator: separator to be used for creating keys for children
 		:param NoneType or bool evaluate:
-		:param NoneType or bool materialize:
+		:param NoneType or bool lazy:
 		:rtype: list[str]
 		"""
 		keys = self[key].keys()
@@ -870,7 +870,7 @@ class PensieveWithoutDisplay:
 					precursors=key,
 					function=lambda x: create_getter(child_key)(x),
 					evaluate=evaluate,
-					materialize=materialize
+					lazy=lazy
 				)
 			else:
 				self.store(
@@ -878,7 +878,7 @@ class PensieveWithoutDisplay:
 					precursors=[key] + precursors,
 					function=lambda x: create_getter(child_key)(x[key]),
 					evaluate=evaluate,
-					materialize=materialize
+					lazy=lazy
 				)
 			result.append(new_key)
 		return result

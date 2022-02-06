@@ -18,7 +18,7 @@ from inspect import getsource as get_source
 class Memory:
 	def __init__(
 			self, key, pensieve, function, _original_function,
-			label=None, precursors=None, safe=True, metadata=False, materialize=True,
+			label=None, precursors=None, safe=True, metadata=False, lazy=False,
 			_update=True, _stale=True, n_jobs=1
 	):
 		"""
@@ -28,7 +28,7 @@ class Memory:
 		:param list[Memory] or NoneType precursors: precursor memories to this memory
 		:param bool safe: when True only a copy of the content is returned to avoid mutating it from outside
 		:param dict metadata: an optional dictionary that carries meta data about this memory
-		:param bool materialize: when False, memory runs the function when it needs the content, rather than keeping it
+		:param bool lazy: when True, memory runs the function only when it needs the content, rather than keeping it
 		:param bool _update: if True the precursors will be updated
 		:param bool _stale:
 		"""
@@ -38,7 +38,7 @@ class Memory:
 		self._label = label
 		self._pensieve = pensieve
 		self._content = None
-		self._materialize = materialize
+		self._materialize = not lazy
 		self._safe = safe
 		if self.pensieve is not None:
 			if self.key not in self.pensieve._successor_keys:
@@ -436,12 +436,12 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, _original_function, label=None, metadata=None, materialize=None):
+	def update(self, precursors, function, _original_function, label=None, metadata=None, lazy=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
 		:type metadata: NoneType or dict
-		:type materialize: bool or NoneType
+		:type lazy: bool or NoneType
 		"""
 		# make precursors unique:
 		if self.is_frozen:
@@ -467,8 +467,8 @@ class Memory:
 
 		if metadata is not None:
 			self._metadata = metadata
-		if materialize is not None:
-			self._materialize = materialize
+		if lazy is not None:
+			self._materialize = not lazy
 
 		if label is not None:
 			self._label = label
