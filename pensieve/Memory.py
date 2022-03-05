@@ -38,7 +38,7 @@ class Memory:
 		self._label = label
 		self._pensieve = pensieve
 		self._content = None
-		self._lazy = lazy
+		self._materialize = not lazy
 		self._safe = safe
 		if self.pensieve is not None:
 			if self.key not in self.pensieve._successor_keys:
@@ -83,7 +83,7 @@ class Memory:
 			function=self._function if include_function else None,
 			precursors=None,
 			safe=self._safe, metadata=self._metadata.copy(),
-			lazy=self._lazy, _update=update, _stale=stale, _original_function=self._original_function
+			materialize=self._materialize, _update=update, _stale=stale, _original_function=self._original_function
 		)
 		return result
 
@@ -231,7 +231,7 @@ class Memory:
 		result = {
 			'key': self.key,
 			'content_type': self._content_type,
-			'lazy': self._lazy,
+			'materialized': self._materialize,
 			'frozen': self._frozen,
 			'evaluation_time': self.evaluation_time,
 			'total_time': self.total_time,
@@ -468,7 +468,7 @@ class Memory:
 		if metadata is not None:
 			self._metadata = metadata
 		if lazy is not None:
-			self._lazy = lazy
+			self._materialize = not lazy
 
 		if label is not None:
 			self._label = label
@@ -525,7 +525,7 @@ class Memory:
 
 	@property
 	def content(self):
-		if self._lazy:
+		if not self._materialize:
 			self.set_content(content=None, precursors_reference=None)
 			content, precursors_reference = self.get_content_and_reference()
 
@@ -619,7 +619,7 @@ class Memory:
 			self.backup_precursors_reference_path.save(obj=precursors_reference, method='pickle', echo=0)
 
 	def mark_stale(self):
-		if not self._lazy:
+		if self._materialize:
 			self._stale = True
 		self._size = None
 		for successor in self.successors:
@@ -656,7 +656,7 @@ class Memory:
 		if len(self.precursor_keys) == 0:
 			new_reference = get_source(self._original_function)
 
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
@@ -670,7 +670,7 @@ class Memory:
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
@@ -684,7 +684,7 @@ class Memory:
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content

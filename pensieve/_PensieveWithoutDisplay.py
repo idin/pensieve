@@ -51,7 +51,7 @@ class PensieveWithoutDisplay:
 		self._num_intermediary_nodes = 0
 		self._num_threads = num_threads
 		self._evaluate = evaluate
-		self._lazy = lazy
+		self._materialize = not lazy
 		self._echo = echo
 		self._n_jobs = n_jobs
 		self._show_types = show_types
@@ -71,7 +71,7 @@ class PensieveWithoutDisplay:
 		'_graph_direction', '_name',
 		'_memories_dictionary', '_precursor_keys', '_successor_keys',
 		'_safe', '_warn_safe', '_function_durations', '_directory', '_hide_ignored',
-		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_lazy', '_echo',
+		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_materialize', '_echo',
 		'_backup_directory', '_backup_memory_directory'
 	]
 
@@ -94,7 +94,7 @@ class PensieveWithoutDisplay:
 			'_num_intermediary_nodes': 0,
 			'_num_threads': 1,
 			'_evaluate': True,
-			'_lazy': False,
+			'_materialize': True,
 			'_echo': 0,
 			'_backup_directory': None,
 			'_backup_memory_directory': None
@@ -580,7 +580,7 @@ class PensieveWithoutDisplay:
 			if function is None:
 				lazy = False
 			else:
-				lazy = self._lazy
+				lazy = not self._materialize
 
 		if function is not None and content is not None:
 			raise StoringError('Pensieve: at least one of function and content should be None!')
