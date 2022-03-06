@@ -18,7 +18,7 @@ from inspect import getsource as get_source
 class Memory:
 	def __init__(
 			self, key, pensieve, function, _original_function,
-			label=None, precursors=None, safe=True, metadata=False, lazy=False,
+			label=None, precursors=None, metadata=False, materialize=True,
 			_update=True, _stale=True, n_jobs=1
 	):
 		"""
@@ -26,7 +26,6 @@ class Memory:
 		:param Pensieve pensieve: the pensieve this memory belongs to
 		:param callable function: a function to be called on precursor memories
 		:param list[Memory] or NoneType precursors: precursor memories to this memory
-		:param bool safe: when True only a copy of the content is returned to avoid mutating it from outside
 		:param dict metadata: an optional dictionary that carries meta data about this memory
 		:param bool lazy: when True, memory runs the function only when it needs the content, rather than keeping it
 		:param bool _update: if True the precursors will be updated
@@ -38,8 +37,7 @@ class Memory:
 		self._label = label
 		self._pensieve = pensieve
 		self._content = None
-		self._lazy = lazy
-		self._safe = safe
+		self._materialize_memory = materialize
 		if self.pensieve is not None:
 			if self.key not in self.pensieve._successor_keys:
 				self.pensieve._successor_keys[self.key] = []
@@ -68,7 +66,7 @@ class Memory:
 			self.update(precursors=precursors, function=function, _original_function=_original_function)
 
 	__PARAMS__ = [
-		'key', 'label', 'materialize', 'safe', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
+		'key', 'label', 'materialize', 'frozen', 'deep_freezed', 'stale', 'metadata', 'total_time', 'size',
 		'precursors_reference', 'content_type', 'content_access_count', 'backup_directory'
 	]
 
@@ -82,8 +80,8 @@ class Memory:
 			key=self.key, pensieve=None,
 			function=self._function if include_function else None,
 			precursors=None,
-			safe=self._safe, metadata=self._metadata.copy(),
-			lazy=self._lazy, _update=update, _stale=stale, _original_function=self._original_function
+			metadata=self._metadata.copy(), _original_function=self._original_function,
+			materialize=self._materialize_memory, _update=update, _stale=stale
 		)
 		return result
 
@@ -144,7 +142,6 @@ class Memory:
 			function=dill.loads(str=state['function']),
 			pensieve=None,
 			precursors=None,
-			safe=state['safe'],
 			metadata=state['meta_data'],
 			_update=False, _stale=state['stale']
 		)
@@ -231,7 +228,7 @@ class Memory:
 		result = {
 			'key': self.key,
 			'content_type': self._content_type,
-			'lazy': self._lazy,
+			'materialize': self._materialize_memory,
 			'frozen': self._frozen,
 			'evaluation_time': self.evaluation_time,
 			'total_time': self.total_time,
@@ -252,7 +249,6 @@ class Memory:
 			result += get_size(self._content, exclude_objects=[self._pensieve])
 			result += get_size(self._precursors_reference, exclude_objects=[self._pensieve])
 			result += get_size(self._content_type, exclude_objects=[self._pensieve])
-			result += get_size(self._safe, exclude_objects=[self._pensieve])
 			result += get_size(self._frozen, exclude_objects=[self._pensieve])
 			result += get_size(self._stale, exclude_objects=[self._pensieve])
 			result += get_size(self._function, exclude_objects=[self._pensieve])
@@ -436,12 +432,12 @@ class Memory:
 
 	# ************************* COMPUTATION **********************************
 
-	def update(self, precursors, function, _original_function, label=None, metadata=None, lazy=None):
+	def update(self, precursors, function, _original_function, label=None, metadata=None, materialize=None):
 		"""
 		:type precursors: list[Memory]
 		:type function: callable
 		:type metadata: NoneType or dict
-		:type lazy: bool or NoneType
+		:type materialize: bool or NoneType
 		"""
 		# make precursors unique:
 		if self.is_frozen:
@@ -467,8 +463,8 @@ class Memory:
 
 		if metadata is not None:
 			self._metadata = metadata
-		if lazy is not None:
-			self._lazy = lazy
+		if materialize is not None:
+			self._materialize_memory = materialize
 
 		if label is not None:
 			self._label = label
@@ -508,7 +504,7 @@ class Memory:
 		"""
 		return self._get_stale_dependencies(unique=True)
 
-	def get_update_schedule(self):
+	def update_and_get_schedule(self):
 		"""
 		:rtype: list[list[Memory]]
 		"""
@@ -525,17 +521,16 @@ class Memory:
 
 	@property
 	def content(self):
-		if self._lazy:
-			self.set_content(content=None, precursors_reference=None)
+		if not self._materialize_memory:
 			content, precursors_reference = self.get_content_and_reference()
-
+			# empty the content because it is not supposed to be materialized
+			self.set_content(content=None, precursors_reference=None)
 		elif self.is_frozen or not self.is_stale:
 			content = self._content
 
 		else:
 			content, precursors_reference = self.get_content_and_reference()
 			self.set_content(content=content, precursors_reference=precursors_reference)
-			content = self._content
 
 		return content
 
@@ -567,6 +562,7 @@ class Memory:
 			return None
 
 	def backup_content_exists(self):
+		return False
 		return self.backup_content_pickle_path.exists() or self.backup_content_dill_path.exists()
 
 	@property
@@ -619,8 +615,7 @@ class Memory:
 			self.backup_precursors_reference_path.save(obj=precursors_reference, method='pickle', echo=0)
 
 	def mark_stale(self):
-		if not self._lazy:
-			self._stale = True
+		self._stale = True
 		self._size = None
 		for successor in self.successors:
 			successor.mark_stale()
@@ -634,7 +629,7 @@ class Memory:
 
 			precursors = self.precursors
 
-			schedule = self.get_update_schedule()
+			schedule = self.update_and_get_schedule()
 
 			progress_bar = ProgressBar(
 				total=sum([len(schedule_round) for schedule_round in schedule]),
@@ -656,7 +651,7 @@ class Memory:
 		if len(self.precursor_keys) == 0:
 			new_reference = get_source(self._original_function)
 
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize_memory:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
@@ -670,7 +665,7 @@ class Memory:
 		elif len(self.precursor_keys) == 1:
 			precursor_content = list(precursor_keys_to_contents.values())[0]
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize_memory:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content
@@ -684,7 +679,7 @@ class Memory:
 		else:
 			inputs = EvaluationInput(inputs=precursor_keys_to_contents)
 			new_reference = (get_source(self._original_function), precursor_keys_to_contents)
-			if new_reference == self._precursors_reference and not self._lazy:
+			if new_reference == self._precursors_reference and self._materialize_memory:
 				new_content = self._content
 			elif self.backup_directory and new_reference == self.backup_precursors_reference and self.backup_content_exists():
 				new_content = self.backup_content

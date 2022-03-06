@@ -12,7 +12,6 @@ from joblib import delayed
 
 from toposort import toposort
 import warnings
-from copy import deepcopy
 from disk import Path
 from abstract import Graph
 import re
@@ -20,12 +19,11 @@ import re
 
 class PensieveWithoutDisplay:
 	def __init__(
-			self, safe=False, name='Pensieve', function_durations=None, warn_unsafe=False, hide_ignored=False,
-			graph_direction='LR', num_threads=1, evaluate=True, lazy=False, backup=False, echo=0,
+			self, name='Pensieve', function_durations=None, hide_ignored=False,
+			graph_direction='LR', num_threads=1, lazy=False, materialize=True, backup=False, echo=0,
 			n_jobs=1, show_types=True
 	):
 		"""
-		:param bool 	safe: 				if True, pensieve memories will be safe from mutations
 		:param str		name:				a name for pensieve
 		:param bool 	hide_ignored: 		if True, ignored nodes will be hidden
 		:param str 		graph_direction: 	'LR' for left to right, 'UD' for up-down
@@ -41,17 +39,13 @@ class PensieveWithoutDisplay:
 		self._memories_dictionary = {}
 		self._precursor_keys = {}
 		self._successor_keys = {}
-		if not safe and warn_unsafe:
-			warnings.warn('Memory contents can be mutated outside a safe pensieve!')
-		self._safe = safe
 		self._name = name
-		self._warn_safe = warn_unsafe
 		self._function_durations = function_durations or MeasurementSet()
 		self._hide_ignored = hide_ignored
 		self._num_intermediary_nodes = 0
 		self._num_threads = num_threads
-		self._evaluate = evaluate
 		self._lazy = lazy
+		self._materialize_memories = materialize
 		self._echo = echo
 		self._n_jobs = n_jobs
 		self._show_types = show_types
@@ -66,11 +60,11 @@ class PensieveWithoutDisplay:
 			self._backup_directory = None
 			self._backup_memory_directory = None
 
-	_PARAMETERS_ = ['safe', 'name', 'warn_safe', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
+	_PARAMETERS_ = ['name', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
 	_STATE_ATTRIBUTES_ = [
 		'_graph_direction', '_name',
 		'_memories_dictionary', '_precursor_keys', '_successor_keys',
-		'_safe', '_warn_safe', '_function_durations', '_directory', '_hide_ignored',
+		'_function_durations', '_directory', '_hide_ignored',
 		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_lazy', '_echo',
 		'_backup_directory', '_backup_memory_directory'
 	]
@@ -87,13 +81,11 @@ class PensieveWithoutDisplay:
 			'_graph_direction': 'LR',
 			'_precursor_keys': state['precursor_keys'],
 			'_successor_keys': state['successor_keys'],
-			'_safe': state['safe'],
-			'_warn_safe': False,
 			'_function_durations': MeasurementSet(),
 			'_hide_ignored': False,
 			'_num_intermediary_nodes': 0,
 			'_num_threads': 1,
-			'_evaluate': True,
+			'_materialize': True,
 			'_lazy': False,
 			'_echo': 0,
 			'_backup_directory': None,
@@ -103,7 +95,7 @@ class PensieveWithoutDisplay:
 
 	def __setstate__(self, state):
 		# backward compatibility
-		if all([key in state for key in ['memories', 'precursor_keys', 'successor_keys', 'safe']]):
+		if all([key in state for key in ['memories', 'precursor_keys', 'successor_keys']]):
 			state = self._make_state_backward_compatibile(state=state)
 
 		for key, value in state.items():
@@ -115,6 +107,18 @@ class PensieveWithoutDisplay:
 		for memory in self.memories_dictionary.values():
 			memory._pensieve = self
 		self._directory._pensieve = self
+
+	def be_lazy(self):
+		self._lazy = True
+
+	def be_eager(self):
+		self._lazy = False
+
+	def materialize_memories(self):
+		self._materialize_memories = True
+
+	def let_memories_dissipate(self):
+		self._materialize_memories = False
 
 	def set_graph_direction(self, direction):
 		"""
@@ -205,7 +209,7 @@ class PensieveWithoutDisplay:
 		:rtype: Pensieve
 		"""
 		new_pensieve = self.__class__(
-			safe=self._safe, function_durations=self.function_durations, warn_unsafe=self._warn_safe,
+			function_durations=self.function_durations,
 			hide_ignored=self._hide_ignored, graph_direction=self._graph_direction
 		)
 		memories_dictionary = {}
@@ -318,7 +322,7 @@ class PensieveWithoutDisplay:
 	def load(cls, path, echo=True):
 		path = Path(path=path)
 		parameters = (path + 'parameters.pensieve').load()
-		pensieve = cls(safe=parameters['safe'])
+		pensieve = cls()
 		for name, value in parameters.items():
 			setattr(pensieve, f'_{name}', value)
 		memory_keys = (path + 'memory_keys.pensieve').load()
@@ -503,15 +507,7 @@ class PensieveWithoutDisplay:
 
 		if item in self._memories_dictionary:
 			memory = self._memories_dictionary[item]
-			if self._safe:
-				try:
-					return deepcopy(memory.content)
-				except MemoryRecursionError as e:
-					message = str(f'could not deepcopy "{item}" because: {e}')
-					warnings.warn(message)
-					return memory.content
-			else:
-				return memory.content
+			return memory.content
 		else:
 			raise MissingMemoryError(f'Pensieve: the "{item}" memory does not exist!')
 
@@ -573,14 +569,15 @@ class PensieveWithoutDisplay:
 		:param bool or NoneType evaluate: if False the memory will not be evaluated
 		:param dict or NoneType metadata: any information on the memory
 		"""
-		if evaluate is None:
-			evaluate = self._evaluate
 
 		if lazy is None:
 			if function is None:
 				lazy = False
 			else:
 				lazy = self._lazy
+
+		if evaluate is None:
+			evaluate = self._materialize_memories and not lazy
 
 		if function is not None and content is not None:
 			raise StoringError('Pensieve: at least one of function and content should be None!')
@@ -647,15 +644,14 @@ class PensieveWithoutDisplay:
 
 		else:
 			memory = Memory(
-				key=key, label=label, pensieve=self, safe=self._safe,
+				key=key, label=label, pensieve=self,
 				precursors=precursor_memories, function=pensieve_function,
-				metadata=metadata, lazy=lazy,
+				metadata=metadata, materialize=self._materialize_memories,
 				_original_function=function, n_jobs=self._n_jobs
 			)
 			self._memories_dictionary[key] = memory
 
-		if evaluate and not lazy:
-			memory = self.memories_dictionary[key]
+		if evaluate:
 			memory.evaluate()  # this will update the content if necessary
 
 	def erase(self, memory):
@@ -884,10 +880,7 @@ class PensieveWithoutDisplay:
 		return result
 
 	def get_contents(self):
-		new_pensieve = self.__class__(
-			safe=self._safe, function_durations=self._function_durations, warn_unsafe=False,
-			hide_ignored=self._hide_ignored
-		)
+		new_pensieve = self.__class__(function_durations=self._function_durations, hide_ignored=self._hide_ignored)
 
 		for key, memory in self.memories_dictionary.items():
 			new_pensieve._memories_dictionary[key] = memory.partial_copy()
