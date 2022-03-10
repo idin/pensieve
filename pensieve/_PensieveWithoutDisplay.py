@@ -638,7 +638,7 @@ class PensieveWithoutDisplay:
 			memory.update(
 				label=label,
 				precursors=precursor_memories, function=pensieve_function,
-				metadata=metadata, lazy=lazy,
+				metadata=metadata,
 				_original_function=function
 			)
 
