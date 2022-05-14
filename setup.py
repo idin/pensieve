@@ -7,7 +7,7 @@ def readme():
 
 setup(
     name='pensieve',
-    version='2022.3.9',
+    version='2022.4.20.1',
     license='MIT',
 
     author='Idin',
@@ -30,7 +30,7 @@ setup(
     packages=find_packages(exclude=("jupyter_tests", ".idea", ".git")),
     install_requires=[
         'dill', 'toposort', 'disk', 'slytherin', 'chronometry', 'joblib', 'pandas',
-        'abstract>=2021.8.20.1'
+        'abstract>=2022.4.20'
     ],
     python_requires='~=3.6',
     zip_safe=True
