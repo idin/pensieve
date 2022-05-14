@@ -696,6 +696,7 @@ class Memory:
 		if self.backup_directory and new_reference != self.backup_precursors_reference:
 			self.backup_content = new_content
 			self.backup_precursors_reference = new_reference
+
 		return new_content, new_reference
 
 	@property
