@@ -21,7 +21,7 @@ class PensieveWithoutDisplay:
 	def __init__(
 			self, name='Pensieve', function_durations=None, hide_ignored=False,
 			graph_direction='LR', num_threads=1, lazy=False, materialize=True, backup=False, echo=0,
-			n_jobs=1, show_types=True
+			n_jobs=1, show_types=True, line_width_by_type=False, line_width=1
 	):
 		"""
 		:param str		name:				a name for pensieve
@@ -33,6 +33,8 @@ class PensieveWithoutDisplay:
 
 		:param MeasurementSet 						function_durations: 	time measurements of memory functions
 		:param bool or int or ProgressBar 			echo: 					int or ProgressBar or bool
+		:param bool line_width_by_type: if True, the line width of graph edges will be chosen by type of objects
+		:param int or float line_width: width of the line
 		"""
 		self._graph_direction = None
 		self.set_graph_direction(graph_direction)
@@ -60,13 +62,17 @@ class PensieveWithoutDisplay:
 			self._backup_directory = None
 			self._backup_memory_directory = None
 
+		self._line_width_by_type = line_width_by_type
+		self._line_width = line_width
+
 	_PARAMETERS_ = ['name', 'function_durations', 'hide_ignored', 'precursor_keys', 'successor_keys']
 	_STATE_ATTRIBUTES_ = [
 		'_graph_direction', '_name',
 		'_memories_dictionary', '_precursor_keys', '_successor_keys',
 		'_function_durations', '_directory', '_hide_ignored',
 		'_num_intermediary_nodes', '_num_threads', '_evaluate', '_lazy', '_echo',
-		'_backup_directory', '_backup_memory_directory'
+		'_backup_directory', '_backup_memory_directory',
+		'_line_width_by_type', '_line_width'
 	]
 
 	def __getstate__(self):
@@ -758,19 +764,29 @@ class PensieveWithoutDisplay:
 			for parent_child in frozen_edges
 		}
 
-		return {
+		edges = []
+		for parent, children in successor_keys.items():
+			for child in children:
+				if self._line_width_by_type:
+					line_width = self.memories_dictionary[parent].type_significance * self._line_width
+				else:
+					line_width = self._line_width
+
+				edges.append((parent, child, {'style': {'line_width': line_width}}))
+
+		result = {
+			'style_overwrite_allowed': True,
 			'colour_scheme': 'pensieve2',
 			'label': self._name,
 			'label_url': 'https://pypi.org/project/pensieve/',
 			'nodes': {key: memory.__graph_node__() for key, memory in memories_dictionary.items()},
-			'edges': [
-				(parent, child, {'style': {'line_width': self.memories_dictionary[parent].type_significance*5}})
-				for parent, children in successor_keys.items() for child in children
-			],
+			'edges': edges,
 			'strict': True,
 			'node_colours': node_colours,
 			'edge_colours': edge_colours
 		}
+
+		return result
 
 	def _get_ancestors(self, memory, memories_travelled=None):
 		"""
